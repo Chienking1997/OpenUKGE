@@ -4,7 +4,7 @@ import pickle
 
 
 class UKGData:
-    def __init__(self, dataset_dir="", use_index_file=False):
+    def __init__(self, dataset_dir="", use_index_file=False, use_pseudo=False):
         """
         Initialize the UKGData class.
 
@@ -31,6 +31,10 @@ class UKGData:
         # Load and map the dataset
         self.load_and_map_dataset()
         self.hr_map = self.load_hr_map(self.dataset_dir)
+        self.use_pseudo=use_pseudo
+        if use_pseudo:
+            self.pseudo_data = self.load_pseudo_data(self.dataset_dir)
+
         # self.load_hr_map2(self.dataset_dir,'val.tsv', ['train.tsv', 'val.tsv', 'test.tsv'])
         # self.hr_map_sub = None
         # self.get_fixed_hr(n=200)
@@ -109,7 +113,7 @@ class UKGData:
             list: A list of tuples containing the data.
         """
         data = []
-        with open(file_path, 'r') as file:
+        with open(file_path, 'r', encoding='utf-8') as file:
             for line in file:
                 head, relation, tail, probability = line.strip().split('\t')
                 data.append((int(head), int(relation), int(tail), float(probability)))
@@ -177,7 +181,7 @@ class UKGData:
             mapping (dict): The mapping to save.
             file_path (str): The path to the file.
         """
-        with open(file_path, mode='w') as outfile:
+        with open(file_path, mode='w', encoding='utf-8') as outfile:
             for key, value in mapping.items():
                 outfile.write(f"{key},{value}\n")
             outfile.close()
@@ -209,6 +213,10 @@ class UKGData:
     def load_test_neg_data(self, dataset_folder):
         test_neg_file = os.path.join(dataset_folder, 'extra', 'test', 'test_with_neg_beurre.tsv')
         return self.load_data(test_neg_file)
+
+    def load_pseudo_data(self, dataset_folder):
+        pseudo_file = os.path.join(dataset_folder, 'extra', 'pseudo.tsv')
+        return self.load_data(pseudo_file)
 
     @staticmethod
     def load_hr_map(data_dir):
@@ -258,6 +266,7 @@ class UKGData:
                     # update hr_map
                     if h in self.hr_map and r in self.hr_map[h]:
                         self.hr_map[h][r][t] = w
+        return self.hr_map
 
     def get_fixed_hr(self, outputdir=None, n=500):
         hr_map500 = {}
@@ -339,7 +348,8 @@ class UKGData:
             'id_rel': self.id_rel,
             'num_ent': len(self.ent_id),
             'num_rel': len(self.rel_id),
-            'ratio_psl': self.RatioOfPSL
+            'ratio_psl': self.RatioOfPSL,
+            'pseudo': self.pseudo_data if self.use_pseudo else None,
         }
 
 

@@ -56,7 +56,7 @@ class FocusE(nn.Module):
         """
 
         if self.base_model == "DistMult":
-            score = head_emb * relation_emb * tail_emb
+            score = (head_emb * tail_emb) * relation_emb
 
             score = score.sum(dim=-1)
         elif self.base_model == "ComplEX":

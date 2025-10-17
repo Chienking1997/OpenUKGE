@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class UPGAT(nn.Module):
@@ -10,12 +11,21 @@ class UPGAT(nn.Module):
         self.num_ent = num_ent
         self.num_rel = num_rel
         self.emb_dim = emb_dim
-        self.ent_emb = nn.Embedding(num_ent, emb_dim)
-        self.rel_emb = nn.Embedding(num_rel, emb_dim)
+        self.ent_emb_init = nn.Parameter(torch.randn(self.num_ent, self.emb_dim))
+        self.rel_emb_init = nn.Parameter(torch.randn(self.num_rel, self.emb_dim))
+        self.ent_emb = nn.Parameter(torch.randn(self.num_ent, self.emb_dim))
+        self.rel_emb = nn.Parameter(torch.randn(self.num_rel, self.emb_dim))
+
+        self.W_1 = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
+        self.W_a = nn.Parameter(torch.zeros(1, self.emb_dim))
+        self.g_0 = nn.Parameter(torch.zeros(1, self.emb_dim))
+        self.W_E = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
+        self.W_R = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
         self.w = nn.Parameter(torch.tensor(1.0), requires_grad=True)
         self.b = nn.Parameter(torch.tensor(0.0), requires_grad=True)
 
         self.init_emb()
+        self.special_spmm_final = SpecialSpmmFinal()
 
     def init_emb(self):
         """Initialize the model and entity and relation embeddings.
@@ -31,16 +41,7 @@ class UPGAT(nn.Module):
             W_E: Weight when update entity embedding.
             W_R: Weight when update relation embedding.
         """
-        self.ent_emb_init = nn.Parameter(torch.randn(self.num_ent, self.emb_dim))
-        self.rel_emb_init = nn.Parameter(torch.randn(self.num_rel, self.emb_dim))
-        self.ent_emb = nn.Parameter(torch.randn(self.num_ent, self.emb_dim))
-        self.rel_emb = nn.Parameter(torch.randn(self.num_rel, self.emb_dim))
 
-        self.W_1 = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
-        self.W_a = nn.Parameter(torch.zeros(1, self.emb_dim))
-        self.g_0 = nn.Parameter(torch.zeros(1, self.emb_dim))
-        self.W_E = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
-        self.W_R = nn.Parameter(torch.zeros(self.emb_dim, self.emb_dim))
         nn.init.xavier_uniform_(self.g_0.data, gain=1.414)
         nn.init.xavier_uniform_(self.W_1.data, gain=1.414)
         nn.init.xavier_uniform_(self.W_a.data, gain=1.414)
@@ -48,9 +49,9 @@ class UPGAT(nn.Module):
         nn.init.xavier_uniform_(self.W_R.data, gain=1.414)
 
     def tri2emb(self, triples):
-        head_emb = self.ent_emb(triples[:, 0])
-        relation_emb = self.rel_emb(triples[:, 1])
-        tail_emb = self.ent_emb(triples[:, 2])
+        head_emb = self.ent_emb[triples[:, 0]]
+        relation_emb = self.rel_emb[triples[:, 1]]
+        tail_emb = self.ent_emb[triples[:, 2]]
         return head_emb, relation_emb, tail_emb
 
     def score_func(self, head_emb, relation_emb, tail_emb):
@@ -72,16 +73,15 @@ class UPGAT(nn.Module):
         score = score.sum(dim=-1)
 
         """ 1.Bounded rectifier """
-        # shape = score.shape
-        # tmp_max = torch.max(self.w * score + self.b, torch.zeros(shape, device=self.args.gpu))
-        # score = torch.min(tmp_max, torch.ones(shape, device=self.args.gpu))
+
+        # score = torch.clamp((self.w * score + self.b), min=0.0, max=1.0)
 
         """ 2.Logistic function"""
         score = torch.sigmoid(self.w * score + self.b)
 
         return score
 
-    def forward_GAT(self, triples, adj_matrix):
+    def forward_GAT(self, triples, adj_matrix, device):
         """The functions used in the training phase for updating embedding of triples.
 
         Args:
@@ -95,8 +95,8 @@ class UPGAT(nn.Module):
             relation_emb: Relation embedding.
             tail_emb: Tail entity embedding.
         """
-        node_list = adj_matrix[0].to(self.args.gpu)  # ent
-        edge_list = adj_matrix[1].to(self.args.gpu)  # rel
+        node_list = adj_matrix[0].to(device)  # ent
+        edge_list = adj_matrix[1].to(device)  # rel
         self.ent_emb_init.data = F.normalize(self.ent_emb_init.data, p=2, dim=1).detach()
         h_i = self.ent_emb_init[node_list[0, :], :]
         h_j = self.ent_emb_init[node_list[1, :], :]
@@ -114,8 +114,8 @@ class UPGAT(nn.Module):
         assert not torch.isnan(a_baseline_exp).any()
         assert not torch.isnan(a_ijk_exp).any()
 
-        a_ijk_exp_sum = self.special_spmm_final(node_list, a_ijk_exp, self.args.num_ent, a_ijk_exp.shape[0], 1)
-        a_baseline_sorted = torch.zeros_like(a_ijk_exp_sum).to(self.args.gpu)
+        a_ijk_exp_sum = self.special_spmm_final(node_list, a_ijk_exp, self.num_ent, a_ijk_exp.shape[0], 1)
+        a_baseline_sorted = torch.zeros_like(a_ijk_exp_sum).to(device)
         a_baseline_sorted[node_list[0]] = a_baseline_exp
         denominator = a_baseline_sorted + a_ijk_exp_sum
         denominator[denominator == 0.0] = 1e-12
@@ -128,9 +128,9 @@ class UPGAT(nn.Module):
         ac_ijk = (a_ijk_exp * c_ijk).t()
         ac_baseline = (a_baseline_exp * c_baseline).t()
 
-        a_ijk_new = self.special_spmm_final(node_list, ac_ijk, self.args.num_ent, ac_ijk.shape[0],
-                                            self.args.emb_dim)
-        a_baseline_new = torch.zeros_like(a_ijk_new).to(self.args.gpu)
+        a_ijk_new = self.special_spmm_final(node_list, ac_ijk, self.num_ent, ac_ijk.shape[0],
+                                            self.emb_dim)
+        a_baseline_new = torch.zeros_like(a_ijk_new).to(device)
         a_baseline_new[node_list[0]] = ac_baseline
 
         assert not torch.isnan(a_baseline_new).any()
@@ -147,20 +147,26 @@ class UPGAT(nn.Module):
         self.ent_emb.data = ent_emb_new.data
         self.rel_emb.data = rel_emb_new.data
 
-        if mode == "single":
-            head_emb = ent_emb_new[triples[:, 0]].unsqueeze(1)  # [bs, 1, dim]
-            relation_emb = rel_emb_new[triples[:, 1]].unsqueeze(1)  # [bs, 1, dim]
-            tail_emb = ent_emb_new[triples[:, 2]].unsqueeze(1)  # [bs, 1, dim]
-        elif mode == "head-batch":
-            head_emb = ent_emb_new[negs]  # [bs, num_neg, dim]
-            relation_emb = rel_emb_new[triples[:, 1]].unsqueeze(1)  # [bs, 1, dim]
-            tail_emb = ent_emb_new[triples[:, 2]].unsqueeze(1)  # [bs, 1, dim]
-        elif mode == "tail-batch":
-            head_emb = ent_emb_new[triples[:, 0]].unsqueeze(1)  # [bs, 1, dim]
-            relation_emb = rel_emb_new[triples[:, 1]].unsqueeze(1)  # [bs, 1, dim]
-            tail_emb = ent_emb_new[negs]
+
+        head_emb = ent_emb_new[triples[:, 0]]
+        relation_emb = rel_emb_new[triples[:, 1]]
+        tail_emb = ent_emb_new[triples[:, 2]]
 
         return head_emb, relation_emb, tail_emb
+
+    def forward_enc_dec(self, triples, adj_matrix, device):
+        """The functions used in the training phase
+
+        Args:
+            triples: The triples ids, as (h, r, t, c), shape:[batch_size, 3].
+
+        Returns:
+            score: The score of triples.
+        """
+        head_emb, relation_emb, tail_emb = self.forward_GAT(triples, adj_matrix, device)
+        score = self.score_func(head_emb, relation_emb, tail_emb)
+
+        return score
 
     def forward(self, triples):
         """The functions used in the training phase
@@ -184,23 +190,25 @@ class UPGAT(nn.Module):
                                  torch.mean(tail_emb ** 2))
 
     def get_tail_score(self, head_id, relation_id):
-        head_emb = self.ent_emb(head_id)
-        relation_emb = self.rel_emb(relation_id)
-        score = self.score_func(head_emb, relation_emb, self.ent_emb.weight.data)
+        head_emb = self.ent_emb[head_id]
+        relation_emb = self.rel_emb[relation_id]
+        score = self.score_func(head_emb, relation_emb, self.ent_emb.data)
         return score
 
     def get_head_score(self, tail_id, relation_id):
-        tail_emb = self.ent_emb(tail_id)
-        relation_emb = self.rel_emb(relation_id)
-        score = self.score_func(self.ent_emb.weight.data, relation_emb, tail_emb)
+        tail_emb = self.ent_emb[tail_id]
+        relation_emb = self.rel_emb[relation_id]
+        score = self.score_func(self.ent_emb.data, relation_emb, tail_emb)
         return score
 
     def get_hrt_score(self, head_id, relation_id, tail_id):
-        head_emb = self.ent_emb(head_id)
-        relation_emb = self.rel_emb(relation_id)
-        tail_emb = self.ent_emb(tail_id)
+        head_emb = self.ent_emb[head_id]
+        relation_emb = self.rel_emb[relation_id]
+        tail_emb = self.ent_emb[tail_id]
         score = self.score_func(head_emb, relation_emb, tail_emb)
         return score
+
+
 
 class SpecialSpmmFunctionFinal(torch.autograd.Function):
     """

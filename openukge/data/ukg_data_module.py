@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 
 
 class UKGDataModule:
-    def __init__(self, sampler=None, batch_size=None, num_workers=None, config=None):
+    def __init__(self, sampler=None, batch_size=None, num_workers=None, config=None, use_pseudo = False):
         if config is not None:
             self.config = config
             self.num_workers = self.config.num_workers
@@ -10,11 +10,15 @@ class UKGDataModule:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.sampler = sampler
+        self.use_pseudo = use_pseudo
+        self.num_ent = self.sampler.get_num_ent()
+        self.num_rel = self.sampler.get_num_rel()
         self.train = self.sampler.get_train_triples()
         self.valid = self.sampler.get_valid_triples()
         self.test = self.sampler.get_test_triples()
-        self.num_ent = self.sampler.get_num_ent()
-        self.num_rel = self.sampler.get_num_rel()
+        self.hr2t = self.sampler.get_hr2t()
+        if self.use_pseudo:
+            self.pseudo = self.sampler.get_pseudo_data()
 
     def train_dataloader(self, psl=False):
         if not psl:
@@ -56,3 +60,28 @@ class UKGDataModule:
 
 
 
+    def gcn_dataloader(self):
+        if self.use_pseudo:
+            pseudo_bs = len(self.pseudo) // (len(self.train) // self.batch_size)
+            self.sampler.get_adj_matrix(use_pseudo=self.use_pseudo, pseudo_data=self.pseudo)
+            return DataLoader(self.pseudo,
+                shuffle=True,
+                batch_size=pseudo_bs,
+                num_workers=self.num_workers,
+                # pin_memory=True,
+                drop_last=True,
+                collate_fn=self.sampler.pseudo_sampling)
+        else:
+            adj_matrix  = Repeater(self.sampler.get_adj_matrix())
+            return adj_matrix
+
+
+class Repeater:
+    def __init__(self, value):
+        self.value = value
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.value

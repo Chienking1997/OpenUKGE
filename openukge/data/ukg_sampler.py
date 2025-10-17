@@ -33,8 +33,10 @@ class UKGSampler:
         self.partitioned_mappings_by_confidence(self.num_partitions)
         self.ss_pool = None
         self.ss_pool_score = None
+        self.pseudo_data = None
         self.ss_pool_end = 1
         self.ss_pool_base = 0
+        self.adj_matrix = None
 
     def get_hr2t_rt2h_from_train(self):
         """Get the set of hr2t and rt2h from train dataset, the data type is numpy.
@@ -167,6 +169,12 @@ class UKGSampler:
             semi_sample_score[0:n_semi_samples] = self.ss_pool_score[start_index:start_index + n_semi_samples]
 
         return semi_sample, semi_sample_score
+
+    def pseudo_sampling(self, train_batch):
+        batch_data = {"pseudo_sample": torch.LongTensor([item[:3] for item in train_batch]),
+                      "pseudo_pro": torch.FloatTensor([item[3] for item in train_batch]),
+                      "adj_matrix": self.adj_matrix}
+        return batch_data
 
     def generate_negative_samples(self, head_id, relation_id, tail_id):
         neg_samples = []
@@ -321,6 +329,15 @@ class UKGSampler:
         processed_data["tr2h_full"] = self.tr2h_full
         return processed_data
 
+    def get_adj_matrix(self, use_pseudo=False, pseudo_data=None):
+        train_data = torch.tensor([item[:3] for item in self.train_triples])
+        if use_pseudo:
+            pseudo_triples = torch.tensor([item[:3] for item in pseudo_data])
+            train_data = torch.cat((train_data, pseudo_triples), dim=0)
+        head, rela, tail = train_data.t()
+        self.adj_matrix = (torch.stack((head, tail)), rela)
+        return {"adj_matrix": self.adj_matrix}
+
     def get_train_triples(self):
         return self.train_triples
 
@@ -341,6 +358,13 @@ class UKGSampler:
 
     def get_num_ent(self):
         return self.num_ent
+
+    def get_pseudo_data(self):
+        self.pseudo_data = self.data['pseudo']
+        return self.pseudo_data
+
+    def get_hr2t(self):
+        return self.hr2t
 
 
 if __name__ == '__main__':

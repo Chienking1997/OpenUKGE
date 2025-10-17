@@ -5,3 +5,4 @@ from .ukg_model import BEUrRE
 from .ukg_model import UKGsE
 from .ukg_model import FocusE
 from .ukg_model import GtransE
+from .ukg_model import UPGAT

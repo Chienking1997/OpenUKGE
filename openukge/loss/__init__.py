@@ -5,3 +5,4 @@ from .ukgse_loss import UKGsELoss
 from .ukge_psl_loss import UKGE_PSL_Loss
 from .focuse_loss import FocusELoss
 from .gtranse_loss import GtransELoss
+from .upgat_loss import UPGAT_Loss

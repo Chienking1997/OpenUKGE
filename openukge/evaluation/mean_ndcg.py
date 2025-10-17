@@ -20,7 +20,7 @@ def mean_ndcg(hr_map, model, device):
 
 def ndcg(h, r, tw_truth, model, device):
     h, r = torch.tensor(h).to(device), torch.tensor(r).to(device)
-    ts = torch.tensor([int(t) for t, _ in tw_truth], dtype=torch.int32).to(device)
+    ts = torch.tensor([int(t) for t, _ in tw_truth], dtype=torch.int64).to(device)
     ranks = get_t_ranks(h, r, ts, model, device)
 
     # linear gain
