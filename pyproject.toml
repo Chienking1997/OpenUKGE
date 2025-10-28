@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "OpenUKGE"
+version = "1.0.0"
+description = "OpenUKGE: An open-source Python library for uncertain knowledge graph embedding"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "LiJianjing" }
+]
+requires-python = ">=3.8, <4.0"
+keywords = ["python-library", "knowledge-graph", "uncertain", "embedding"]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "requests>=2.31.0",
+    "tqdm>=4.66.1",
+    "numpy<2"
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "flake8"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Chienking1997/OpenUKGE"
+"Source" = "https://github.com/Chienking1997/OpenUKGE"

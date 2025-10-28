@@ -19,12 +19,34 @@ Uncertain knowledge graphs (UKGs), which associate each triple with a confidence
 - **High Reproducibility**: Standardized experimental pipelines to ensure consistent and comparable results  
 - **Extensible Architecture**: Easy to extend with new models, datasets, or evaluation metrics
 
-## Installation  
+## 📦 Installation
+### 1. Install PyTorch for your system 
+⚙️OpenUKGE depends on PyTorch, but it is not included in the default dependency list. The reason is: 
+
+1. Different hardware configurations require different PyTorch builds.
+2. Official recommendation: PyTorch developers advise users to install it manually using the appropriate wheel for their environment.
+3. Avoiding compatibility issues: Including PyTorch directly in install_requires often causes failed installations or large downloads on systems without matching CUDA libraries.
+
+Example for torch 2.3.0 + CUDA 12.1:
+```bash
+pip install torch==2.3.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
+```
+Example (CPU-only):
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+### 2. Install OpenUKGE package
++ Install from source
 ```bash
 git clone https://github.com/Chienking1997/OpenUKGE.git  
 cd OpenUKGE  
-pip install -r requirements.txt  
+pip install .
 ```
++ Install by pypi
+```bash
+pip install OpenUKGE
+```
+---
 
 ## 🚀 Quick Start
 Take training the UKGE model using the NL27K dataset as an example.  
