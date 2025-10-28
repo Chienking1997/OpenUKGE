@@ -1,0 +1,10 @@
+# PyTorch GPU version
+torch==2.3.0+cu121
+-f https://download.pytorch.org/whl/torch_stable.html
+
+# HTTP requests library
+requests>=2.31.0
+
+# Progress bar utility
+tqdm>=4.66.1
+
