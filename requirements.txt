@@ -2,6 +2,9 @@
 torch==2.3.0+cu121
 -f https://download.pytorch.org/whl/torch_stable.html
 
+# NumPy (restrict version < 2.0 to ensure compatibility)
+numpy<2.0
+
 # HTTP requests library
 requests>=2.31.0
 
