@@ -42,8 +42,9 @@ pip install -r requirements.txt
 - `requirements.txt` – python dependencies  
 - `LICENSE` – GPL‑3.0 Open Source License  
 
-## License  
+## 🪪 License  
 This project is licensed under the **GNU General Public License v3.0 (GPL‑3.0)**.
+See [LICENSE](LICENSE) for details.
 
 ## Citation  
 If you use this library in your research, please cite the associated work:  
