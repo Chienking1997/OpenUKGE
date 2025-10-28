@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class UKGE(nn.Module):
-    def __init__(self, num_ent=None, num_rel=None, emb_dim=None, reg_scale=None, config=None):
+    def __init__(self, num_ent=None, num_rel=None, emb_dim=None, reg_scale=0.005, config=None):
         super(UKGE, self).__init__()
         self.config = config
         self.reg_scale = reg_scale

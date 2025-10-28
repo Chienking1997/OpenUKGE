@@ -1,4 +1,5 @@
 from .ukg_model import UKGE
+from .ukg_model import UKGEPSL
 from .ukg_model import PASSLEAF
 from .ukg_model import BEUrRE
 from .ukg_model import UKGsE

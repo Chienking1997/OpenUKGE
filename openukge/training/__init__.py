@@ -1,4 +1,5 @@
 from .ukge_psl_trainer import UKGEPSLTrainer
+from .ukge_trainer import UKGETrainer
 from .passleaf_trainer import PASSLEAFTrainer
 from .beurre_trainer import BEUrRETrainer
 from .focuse_trainer import FocusETrainer
