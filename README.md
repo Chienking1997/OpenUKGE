@@ -1,11 +1,14 @@
 # OpenUKGE  
 An Open‑Source Python Library for Uncertain Knowledge Graph Embedding
 
-## Overview  
-Uncertain knowledge graphs (UKGs), which associate each triple with a confidence score, have recently attracted growing attention for their ability to represent and reason under uncertainty. Compared with deterministic knowledge graphs, UKGs enable more reliable knowledge completion and confidence estimation, but they also bring new challenges to embedding and evaluation.  
-Despite the rapid development of uncertain knowledge graph embedding (UKGE) methods, their fair comparison and practical adoption remain difficult due to heterogeneous implementations, programming languages, and evaluation settings.
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8%2B-green.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-%E2%9D%A4-red?logo=pytorch)](https://pytorch.org/)
 
-In this paper, we introduce **OpenUKGE**, an open‑source Python library for unified and reproducible representation learning on UKGs. OpenUKGE integrates a wide range of embedding models, benchmark datasets, and both standard and newly designed evaluation protocols within a single framework. This allows researchers to perform fair and comprehensive evaluations, efficiently reproduce existing methods, and easily extend the framework with their own models. We hope that OpenUKGE can serve as a standardized and extensible platform to accelerate research on uncertain knowledge graphs.  
+## Overview  
+Uncertain knowledge graphs (UKGs), which associate each triple with a confidence score, enable more reliable knowledge completion and uncertainty-aware reasoning compared to deterministic knowledge graphs. However, heterogeneous implementations, diverse programming languages, and inconsistent evaluation settings of existing uncertain knowledge graph embedding (UKGE) methods hinder fair comparison and practical adoption.
+
+**OpenUKGE** addresses these challenges by providing a unified, reproducible Python framework for UKGE research, supporting standardized model implementation, dataset integration, and evaluation protocols.
 
 ## Key Features  
 - Support embedding of uncertain knowledge graphs: triples of the form (h, r, t, confidence)  
@@ -44,7 +47,19 @@ This project is licensed under the **GNU General Public License v3.0 (GPL‑3.0)
 
 ## Citation  
 If you use this library in your research, please cite the associated work:  
-> Chen, X., Chen, M., Shi, W., Sun, Y., Zaniolo, C. *Embedding Uncertain Knowledge Graphs*. AAAI 2019.
+
+## 🤝 Acknowledgements
+
+OpenUKGE builds upon:
+- [PyTorch](https://pytorch.org/) 
+- [UKGE (Chen et al., 2019)](https://github.com/stasl0217/UKGE)
+- [UKGsE (Yang et al., 2020)](https://github.com/ShihanYang/UKGsE)
+- [PASSLEAF (Chen et al., 2021)](https://github.com/Franklyncc/PASSLEAF)
+- [BEUrRE (Chen et al., 2021)](https://github.com/stasl0217/beurre)
+- [unKR (Wang et al., 2024)](https://github.com/seucoin/unKR)
+
+
+---
 
 ## Contributing  
 Contributions are very welcome. You can:  
