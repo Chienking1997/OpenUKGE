@@ -15,6 +15,7 @@ class UKGSampler:
         self.soft_logic_triples = data['soft_logic']
         self.test_neg = data['test_neg']
         self.hr_map = data['hr_map']
+        self.hr_map_val = data['hr_map_val']
         self.all_true_triples = data['all_true']
         self.num_ent = data['num_ent']
         self.num_rel = data['num_rel']
@@ -39,7 +40,7 @@ class UKGSampler:
         self.adj_matrix = None
 
     def get_hr2t_rt2h_from_train(self):
-        """Get the set of hr2t and rt2h from train dataset, the data type is numpy.
+        """Get the set of hr2t and rt2h from train dataset.
 
         Update:
             self.hr2t_train: The set of hr2t.
@@ -286,7 +287,7 @@ class UKGSampler:
         processed_data["high_probabilities"] = torch.FloatTensor(high_probabilities)
         processed_data["len_high_triples"] = len(high_triples)
 
-        processed_data["hr_map"] = self.hr_map
+        processed_data["hr_map"] = self.hr_map_val
         processed_data["hr2t_high_score"] = self.hr2t_high_score
         processed_data["tr2h_high_score"] = self.tr2h_high_score
         processed_data["num_partitions"] = self.num_partitions
@@ -365,6 +366,252 @@ class UKGSampler:
 
     def get_hr2t(self):
         return self.hr2t
+
+
+
+
+
+class FewShotSampler:
+    """GMUC task-based few-shot sampler (no numpy/pandas, no deprecated Variable)."""
+
+    def __init__(self, data, num_neg, bs, few=3, type_constrain=True, has_ont=False, rel_uc=None):
+        self.data = data
+        self.num_neg = num_neg
+        self.e1rel_e2 = data['e1rel_e2']
+        self.rele1_e2 = data['rele1_e2']
+        self.test_tasks = data['test_tasks']
+        self.dev_tasks = data['dev_tasks']
+        self.train_tasks = data['train_tasks']
+        self.e1_degrees = data['e1_degrees']
+        self.connections = data['connections']
+        self.ent2ic = data['ent2ic']
+        self.rel_uc2 = data['rel_uc2']
+        self.rel_uc = rel_uc
+        self.rel_uc1 = data['rel_uc1']
+        self.has_ont = has_ont
+        self.symbol2id = data['symbol2id']
+        self.batch_size = bs
+        self.type_constrain = type_constrain
+        self.rel2candidates = data['rel2candidates']
+        self.ent2id = data['ent2id']
+        self.num_symbols = data['num_symbols']
+        self.few = few
+        self.device = None
+
+    def get_device(self, device='cpu'):
+        self.device = device
+
+    def get_num_symbols(self):
+        return self.num_symbols
+
+    def get_few(self):
+        return self.few
+
+    def get_ent2id(self):
+        return self.ent2id
+
+    def get_type_constrain(self):
+        return self.type_constrain
+
+    def get_rel2candidates(self):
+        return self.rel2candidates
+
+    def get_rele1_e2(self):
+        return self.rele1_e2
+
+    def get_symbol2id(self):
+        return self.symbol2id
+
+    def get_e1rel_e2(self):
+        return self.e1rel_e2
+
+
+    def sampling(self, data):
+        """
+        Filtering out positive samples and selecting some samples randomly as negative samples.
+
+        Args:
+            data (list[dict]): One task (relation) and all its triples, e.g. [{"r": [...triples...]}].
+
+        Returns:
+            dict: batch_data containing support/query/false/meta tensors and related info.
+        """
+        batch_data = {}
+
+        # ---- 1. 提取 query (关系名) 与所有三元组 ----
+        rel_name = next(iter(data[0].keys()))
+        task_triples = [t for sublist in data[0].values() for t in sublist]
+
+        # ---- 2. 确定候选实体 ----
+        if self.type_constrain and rel_name in self.rel2candidates:
+            candidates = self.rel2candidates[rel_name]
+        else:
+            candidates = list(self.ent2id.keys())
+            random.shuffle(candidates)
+            candidates = candidates[:1000]  # 限制候选数量以加速
+
+        # ---- 3. 构造 support 与 query ----
+        random.shuffle(task_triples)
+        few = min(self.few, len(task_triples))
+        support_triples = task_triples[:few]
+        remaining_triples = task_triples[few:]
+
+        if len(remaining_triples) < self.batch_size:
+            query_triples = [random.choice(remaining_triples or task_triples)
+                             for _ in range(self.batch_size)]
+        else:
+            query_triples = random.sample(remaining_triples, self.batch_size)
+
+        # ---- 4. 构造 support/query 张量数据 ----
+        def to_pairs(triples):
+            return [[self.symbol2id[h], self.symbol2id[t], float(s)] for h, r, t, s in triples]
+
+        support_pairs = to_pairs(support_triples)
+        query_pairs = to_pairs(query_triples)
+        query_confidence = [float(t[3]) for t in query_triples]
+
+        support_left = [self.ent2id[t[0]] for t in support_triples]
+        support_right = [self.ent2id[t[2]] for t in support_triples]
+        query_left = [self.ent2id[t[0]] for t in query_triples]
+        query_right = [self.ent2id[t[2]] for t in query_triples]
+
+        # ---- 5. 生成负样本 ----
+        false_pairs, false_left, false_right = self.generate_false(query_triples, candidates)
+
+        # ---- 6. 生成 meta 信息 ----
+        support_meta = self.get_meta(support_left, support_right)
+        query_meta = self.get_meta(query_left, query_right)
+        false_meta = self.get_meta(false_left, false_right)
+
+        # ---- 7. 构造 symbolid-ic ----
+        symbolid_ic = []
+        if self.has_ont:
+            rel2ic = self.rel_uc1 if self.rel_uc == 1 else self.rel_uc2
+            seen = set()
+            for h, _, t, _ in task_triples:
+                if h not in seen:
+                    symbolid_ic.append([self.symbol2id[h], float(self.ent2ic[h])])
+                    seen.add(h)
+                if t not in seen:
+                    symbolid_ic.append([self.symbol2id[t], float(self.ent2ic[t])])
+                    seen.add(t)
+            symbolid_ic.append([self.symbol2id[rel_name], float(rel2ic[rel_name])])
+
+        # ---- 8. 转为张量 ----
+
+
+        support = torch.tensor(support_pairs, dtype=torch.float, device=self.device)
+        query = torch.tensor(query_pairs, dtype=torch.float, device=self.device)
+        false = torch.tensor(false_pairs, dtype=torch.float, device=self.device)
+        symbolid_ic = torch.tensor(symbolid_ic or [[0, 0.0]], dtype=torch.float, device=self.device)
+
+        # ---- 9. 打包输出 ----
+        batch_data.update({
+            "support": support,
+            "query": query,
+            "false": false,
+            "query_confidence": query_confidence,
+            "support_meta": support_meta,
+            "query_meta": query_meta,
+            "false_meta": false_meta,
+            "symbolid_ic": symbolid_ic
+        })
+
+        return batch_data
+
+    def get_meta(self, left, right):
+        """Get meta information for support/query/false."""
+        def stack_entities(indices):
+            mats = [self.connections[i] for i in indices]
+            return torch.tensor(mats, dtype=torch.float)
+
+        left_conn = stack_entities(left)
+        right_conn = stack_entities(right)
+        left_deg = torch.tensor([self.e1_degrees[i] for i in left], dtype=torch.float)
+        right_deg = torch.tensor([self.e1_degrees[i] for i in right], dtype=torch.float)
+
+
+        return (
+            left_conn.to(self.device),
+            left_deg.to(self.device),
+            right_conn.to(self.device),
+            right_deg.to(self.device),
+        )
+
+    def generate_false(self, query_triples, candidates):
+        """
+        Generate false (negative) triples.
+
+        Args:
+            query_triples (list[list]): Query triples, each like [h, r, t, s].
+            candidates (list[str]): All candidate entities for the given relation.
+
+        Returns:
+            tuple: (false_pairs, false_left, false_right)
+                - false_pairs: list of [h_id, t_id, 0.0]
+                - false_left: list of head entity IDs
+                - false_right: list of tail entity IDs
+        """
+        false_pairs = []
+        false_left = []
+        false_right = []
+
+        for triple in query_triples:
+            e_h, rel, e_t, s = triple
+            valid_neg_count = 0
+            attempts = 0
+            max_attempts = 50 * self.num_neg  # 防止无限循环
+
+            while valid_neg_count < self.num_neg and attempts < max_attempts:
+                attempts += 1
+                noise = random.choice(candidates)
+                # 跳过正样本或重复采样
+                if noise == e_t or noise in self.e1rel_e2[e_h + rel]:
+                    continue
+
+                # 负样本成立
+                false_pairs.append([
+                    self.symbol2id[e_h],
+                    self.symbol2id[noise],
+                    0.0
+                ])
+                false_left.append(self.ent2id[e_h])
+                false_right.append(self.ent2id[noise])
+
+                valid_neg_count += 1
+
+        return false_pairs, false_left, false_right
+
+    @staticmethod
+    def test_sampling(data):
+        """Sampling triples and recording positive triples for testing.
+
+        Args:
+            data: The triples used to be sampled.
+
+        Returns:
+            batch_data: The data used to be evaluated.
+        """
+        query = str(list(data[0].keys())).replace("'", "").replace("[", "").replace("]", "")
+        triple = list(data[0].values())
+        triples = [item for sublist in triple for item in sublist]
+
+        batch_data = {"query": query, "triples": triples}
+
+        return batch_data
+
+    def get_train(self):
+        """Return list of training tasks as [{rel: triples}]"""
+        return [{k: v} for k, v in self.train_tasks.items()]
+
+    def get_valid(self):
+        """Return list of validation tasks as [{rel: triples}]"""
+        return [{k: v} for k, v in self.dev_tasks.items()]
+
+    def get_test(self):
+        """Return list of testing tasks as [{rel: triples}]"""
+        return [{k: v} for k, v in self.test_tasks.items()]
+
 
 
 if __name__ == '__main__':

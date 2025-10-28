@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 
-class UKGE_PSL_Loss(nn.Module):
+class UKGEPSLLoss(nn.Module):
     def __init__(self):
-        super(UKGE_PSL_Loss, self).__init__()
+        super(UKGEPSLLoss, self).__init__()
         self.criterion = nn.MSELoss()
 
     def forward(self, pos_score, neg_score, pro, psl_score, psl_pro):

@@ -25,11 +25,17 @@ class UKGsE(nn.Module):
         else:
             self.xavier_init_emb()
 
-    def init_emb(self, word_embedding, word_id_dict):
-        for i in range(self.num_ent):
-            self.ent_emb.weight.data[i] = word_embedding[word_id_dict[i]]
-        for i in range(self.num_rel):
-            self.ent_emb.weight.data[i] = word_embedding[word_id_dict['r' + str(i)]]
+    def init_emb(self, word_embedding, word2idx):
+        with torch.no_grad():
+            for i in range(self.num_ent):
+                w = str(i)
+                if w in word2idx:
+                    self.ent_emb.weight[i] = word_embedding[word2idx[w]]
+
+            for i in range(self.num_rel):
+                w = "r" + str(i)
+                if w in word2idx:
+                    self.rel_emb.weight[i] = word_embedding[word2idx[w]]
 
     def xavier_init_emb(self):
         nn.init.xavier_uniform_(self.ent_emb.weight.data)

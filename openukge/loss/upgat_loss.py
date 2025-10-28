@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 
-class UPGAT_Loss(nn.Module):
+class UPGATLoss(nn.Module):
     def __init__(self):
-        super(UPGAT_Loss, self).__init__()
+        super(UPGATLoss, self).__init__()
         self.criterion = nn.MSELoss()
 
 

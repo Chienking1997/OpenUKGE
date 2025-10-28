@@ -1,127 +1,202 @@
 import torch
 from tqdm.auto import tqdm, trange
+
+# === Local project imports ===
 from ..utils import prepare_device
-from ..evaluation import conf_predict, print_results
-from ..evaluation import link_predict, high_link_predict, weight_link_predict
-from ..evaluation import val_link_predict, val_high_link_predict, val_weight_link_predict
-from ..evaluation import mean_ndcg, ece_t
+from ..evaluation import (
+    high_link_predict,
+    weight_link_predict,
+    val_link_predict,
+    val_high_link_predict,
+    val_weight_link_predict,
+    mean_ndcg,
+)
 
 
 class FocusETrainer:
-    def __init__(self, data=None, model=None, loss=None, opt=None, early_stop=None, save_path=None, config=None):
+    """
+    Trainer for FocusE Knowledge Graph Embeddings with weighted scoring.
+
+    Handles training, validation, and testing with uncertainty and weighted link predictions.
+
+    Args:
+        data: Dataset wrapper providing train/val/test dataloaders.
+        model: PyTorch model instance.
+        loss: Loss function callable.
+        opt: Optimizer/scheduler builder (must implement `build_optimizer` and `build_scheduler`).
+        early_stop: EarlyStopping instance.
+        save_path (str): Path to save the best model checkpoint.
+        config (dict, optional): Optional configuration dictionary.
+    """
+
+    def __init__(self, data=None, model=None, loss=None, opt=None,
+                 early_stop=None, save_path=None, config=None):
+        # === Data and device setup ===
         self.data = data
-        self.train = data.train_dataloader()
-        self.valid = data.val_dataloader()
+        self.train_loader = data.train_dataloader()
+        self.valid_loader = data.val_dataloader()
         self.test_data = data.test_dataloader()
         self.device = prepare_device()
-        self.num_neg = data.sampler.num_neg
-        self.model = model.to(self.device)
+        self.num_neg = data.sampler.num_neg  # Number of negative samples for weighted scoring
 
-        self.loss = loss
+        # === Model & components ===
+        self.model = model.to(self.device)
+        self.loss_fn = loss
         self.early_stop = early_stop
         self.save_path = save_path
         self.config = config
+
+        # === Optimizer & scheduler ===
         self.optimizer = opt.build_optimizer(model=self.model)
         self.scheduler = opt.build_scheduler(optimizer=self.optimizer)
 
-    def fit(self, epochs=None, eval_freq=5):
-        epochs_bar = trange(1, epochs + 1, leave=True)
+    # --------------------------------------------------------------------------
+    # Training Loop
+    # --------------------------------------------------------------------------
+    def fit(self, epochs: int, eval_freq: int = 5):
+        """
+        Run the training loop with periodic validation and early stopping.
+
+        Args:
+            epochs (int): Total number of epochs.
+            eval_freq (int): Frequency of validation in epochs.
+        """
+        epochs_bar = trange(1, epochs + 1, desc="Training", leave=True)
+
         for epoch in epochs_bar:
-            avg_loss = self.train_epoch(epoch-1, epochs-1)
-            epochs_bar.set_description("Epoch %d | loss: %.4f" % (epoch, avg_loss))
-            if epoch % eval_freq == 0:
-                result = self.valid_epoch(self.early_stop.get_monitor(), self.early_stop.get_monitor_mode())
-                stop_flag, best_valid_result = self.early_stop(result, model=self.model,
-                                                               save_path=self.save_path)
-                epochs_bar.set_postfix_str("val_result: %.4f, best_val_result: %.4f" %
-                                           (result, best_valid_result))
+            avg_loss = self._train_epoch(epoch - 1, epochs - 1)
+            epochs_bar.set_description(f"Epoch {epoch} | Loss: {avg_loss:.4f}")
+
+            # === Periodic validation ===
+            if self.early_stop and epoch % eval_freq == 0:
+                monitor_metric = self.early_stop.get_monitor()
+                mode = self.early_stop.get_monitor_mode()
+                val_result = self._valid_epoch(monitor_metric, mode)
+
+                stop_flag, best_val = self.early_stop(
+                    val_result, model=self.model, save_path=self.save_path
+                )
+                epochs_bar.set_postfix(val=f"{val_result:>8.4f}", best=f"{best_val:>8.4f}")
 
                 if stop_flag:
-                    print("Early Stop!")
+                    print(f"🛑 Early stopping triggered at epoch {epoch}.")
                     break
-        print("Training Finished! The model saved at %s" % self.save_path)
 
-    def train_epoch(self, epoch, epochs):
+        print(f"✅ Training completed. Best model saved at: {self.save_path}")
+
+    # --------------------------------------------------------------------------
+    # Train One Epoch
+    # --------------------------------------------------------------------------
+    def _train_epoch(self, epoch: int, total_epochs: int) -> float:
+        """
+        Run one training epoch and return the average loss.
+
+        Args:
+            epoch (int): Current epoch index (0-based).
+            total_epochs (int): Total number of epochs.
+
+        Returns:
+            float: Average loss over this epoch.
+        """
         self.model.train()
-        self.model.adjust_parameters(epoch, epochs)
-        total_loss = 0  # Initialize total loss for averaging
+        self.model.adjust_parameters(epoch, total_epochs)  # Adjust dynamic parameters
+        total_loss = 0.0
+        train_bar = tqdm(self.train_loader, desc="Train", leave=False)
 
-        train_bar = tqdm(self.train, desc=f"Training", leave=False)
-        num_batches = len(train_bar)
+        for batch in train_bar:
+            # --- Move tensors to device ---
+            pos_sample = batch["positive_sample"].to(self.device)
+            neg_sample = batch["negative_sample"].to(self.device)
+            pro = batch["probabilities"].to(self.device)
+            pro_expand = pro.view(-1, 1).expand(-1, 2 * self.num_neg)  # Expand for negative sampling
 
-        for train_batch in train_bar:
-            pos_sample = train_batch["positive_sample"].to(self.device)
-            neg_sample = train_batch["negative_sample"].to(self.device)
-            pro = train_batch["probabilities"].to(self.device)
+            # --- Forward + Backward ---
             self.optimizer.zero_grad()
-
-            pos_score = self.model(pos_sample, pro)
-            neg_score = self.model(neg_sample, pro, num_neg=self.num_neg)
+            pos_score = self.model.forward_weighted(pos_sample, pro)
+            neg_score = self.model.forward_weighted(neg_sample, pro, pro_expand)
             regularization1 = self.model.regularization(pos_sample)
             regularization2 = self.model.regularization2()
-            loss = self.loss(pos_score, neg_score) + regularization1 + regularization2
+            loss = self.loss_fn(pos_score, neg_score) + regularization1 + regularization2
             loss.backward()
             self.optimizer.step()
+
             total_loss += loss.item()
-            train_bar.set_postfix(loss=loss.item())
+            train_bar.set_postfix(loss=f"{loss.item():.4f}")
+
         if self.scheduler is not None:
             self.scheduler.step()
 
-        return total_loss / num_batches
+        return total_loss / len(train_bar)
 
-    def valid_epoch(self, monitor, mode):
+    # --------------------------------------------------------------------------
+    # Validation
+    # --------------------------------------------------------------------------
+    def _valid_epoch(self, monitor: str, mode: str) -> float:
+        """
+        Run a validation epoch and return the metric specified by `monitor`.
+
+        Args:
+            monitor (str): Metric to monitor, one of {"umrr", "umr", "mrr", "mr", "wmrr", "wmr"}.
+            mode (str): Prediction mode, e.g., "head", "tail", "average".
+
+        Returns:
+            float: Validation score for the monitored metric.
+        """
         self.model.eval()
         with torch.no_grad():
-            val_triples = self.valid["triples"].to(self.device)
-            val_pro = self.valid["probabilities"].to(self.device)
-            if monitor == 'mse' or monitor == 'mae':
-                mse, mae = conf_predict(val_triples, val_pro, self.model)
-                result = {'mse': mse.item(), 'mae': mae.item()}
-                return result[monitor]
-            elif monitor == 'umrr':
-                result = val_link_predict(val_triples, val_pro, self.model, self.valid, prediction_mode=mode)
-                (mr_raw, mrr_raw, hit1_raw, hit3_raw, hit10_raw,
-                 mr_filter, mrr_filter, hit1_filter, hit3_filter, hit10_filter) = result
-                return mrr_raw
-            elif monitor == 'mrr':
-                high_triples = self.valid["high_triples"].to(self.device)
-                high_pro = self.valid["high_probabilities"].to(self.device)
-                result = val_high_link_predict(high_triples, high_pro, self.model, self.valid, prediction_mode=mode)
-                (mr_raw, mrr_raw, hit1_raw, hit3_raw, hit10_raw,
-                 mr_filter, mrr_filter, hit1_filter, hit3_filter, hit10_filter) = result
-                return mrr_raw
-            elif monitor == 'wmrr':
-                result = val_weight_link_predict(val_triples, val_pro, self.model, self.valid, prediction_mode=mode)
-                mr_raw, mrr_raw, hit20_raw, hit40_raw = result
-                return mrr_raw
+            val_triples = self.valid_loader["triples"].to(self.device)
+            val_probs = self.valid_loader["probabilities"].to(self.device)
 
+            # --- Uncertainty-aware link prediction ---
+            if monitor in {"umrr", "umr"}:
+                result = val_link_predict(val_triples, val_probs, self.model,
+                                          self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
+                return mrr_raw.item() if monitor == "umrr" else mr_raw.item()
+
+            # --- High-confidence link prediction ---
+            elif monitor in {"mrr", "mr"}:
+                high_triples = self.valid_loader["high_triples"].to(self.device)
+                high_probs = self.valid_loader["high_probabilities"].to(self.device)
+                result = val_high_link_predict(high_triples, high_probs, self.model,
+                                               self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
+                return mrr_raw.item() if monitor == "mrr" else mr_raw.item()
+
+            # --- Weighted link prediction ---
+            elif monitor in {"wmrr", "wmr"}:
+                result = val_weight_link_predict(val_triples, val_probs, self.model,
+                                                 self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
+                return mrr_raw.item() if monitor == "wmrr" else mr_raw.item()
+
+            else:
+                raise ValueError(f"Unsupported monitor type: {monitor}")
+
+    # --------------------------------------------------------------------------
+    # Testing
+    # --------------------------------------------------------------------------
     def test(self):
+        """
+        Evaluate the best saved model on the test set.
+        Includes weighted and high-confidence link predictions and ranking metrics.
+        """
         self.model.eval()
         with torch.no_grad():
-            self.model.load_state_dict(torch.load(self.save_path))
-            test_triples = self.test_data["triples"].to(self.device)
-            test_pro = self.test_data["probabilities"].to(self.device)
-            test_high_triples = self.test_data["high_triples"].to(self.device)
-            test_high_pro = self.test_data["high_probabilities"].to(self.device)
-            # mse, mae = conf_predict(test_triples, test_pro, self.model)
-            # print_results(mse, mae)
-            # link_predict(test_triples, test_pro, self.model, self.test_data)
-            high_link_predict(test_high_triples, test_high_pro, self.model, self.test_data)
-            weight_link_predict(test_triples, test_pro, self.model, self.test_data)
-            linear_ndcg, exp_ndcg = mean_ndcg(self.test_data["hr_map"], self.model, self.device)
-            print(linear_ndcg, exp_ndcg)
-            # === Calibration (ECE) ===
-            ece = ece_t(
-                self.test_data["test_neg"].to(self.device),
-                self.test_data["test_neg_pro"].to(self.device),
-                self.model
-            )
-            print(f"ECE with neg: {ece:.4f}")
-            ece = ece_t(
-                self.test_data["triples"].to(self.device),
-                self.test_data["probabilities"].to(self.device),
-                self.model
-            )
-            print(f"ECE: {ece:.4f}")
-            print("✅ Test completed.")
+            # --- Load best model ---
+            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
 
+            test_triples = self.test_data["triples"].to(self.device)
+            test_probs = self.test_data["probabilities"].to(self.device)
+            test_high_triples = self.test_data["high_triples"].to(self.device)
+            test_high_probs = self.test_data["high_probabilities"].to(self.device)
+
+            # --- Link prediction ---
+            high_link_predict(test_high_triples, test_high_probs, self.model, self.test_data)
+            weight_link_predict(test_triples, test_probs, self.model, self.test_data)
+
+            # --- Ranking metrics ---
+            linear_ndcg, exp_ndcg = mean_ndcg(self.test_data["hr_map"], self.model, self.device)
+            print(f"nDCG_linear: {linear_ndcg:.4f} | nDCG_exp: {exp_ndcg:.4f}")
+
+            print("✅ Test completed.")

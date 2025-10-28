@@ -1,58 +1,35 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch import Tensor
 
 
-class CBOWModel(nn.Module):
-    def __init__(self, emb_size, emb_dimension, device):
-        super(CBOWModel, self).__init__()
-        self.emb_size = emb_size
-        self.emb_dimension = emb_dimension
-        self.device = device
-        self.u_embeddings = nn.Embedding(self.emb_size, self.emb_dimension)  # Define input embeddings
-        self.w_embeddings = nn.Embedding(self.emb_size, self.emb_dimension)  # Define output embeddings
-        self._init_embedding()  # Initialize embeddings
+class Word2VecCBOWModel(nn.Module):
+    """Word2Vec model with negative sampling, supporting confidence weights on positive samples only."""
 
-    def _init_embedding(self):
-        int_range = 0.5 / self.emb_dimension
-        self.u_embeddings.weight.data.uniform_(-int_range, int_range)
-        self.w_embeddings.weight.data.zero_()
+    def __init__(self, vocab_size: int, emb_dim: int):
+        super().__init__()
+        self.input_emb = nn.Embedding(vocab_size, emb_dim)
+        self.output_emb = nn.Embedding(vocab_size, emb_dim)
+        self._reset_parameters()
 
-    # Forward pass
-    def forward(self, pos_u, pos_w, neg_w):
-        pos_u_emb = []
-        for per_Xw in pos_u:
-            per_u_emb = self.u_embeddings(
-                torch.LongTensor(per_Xw).to(self.device))  # Embedding lookup for context words
-            per_u_sum = torch.sum(per_u_emb, dim=0)  # Sum over embeddings
-            pos_u_emb.append(per_u_sum)
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(self.input_emb.weight)
+        nn.init.xavier_uniform_(self.output_emb.weight)
 
-        pos_u_emb = torch.stack(pos_u_emb)  # Stack into tensor of size [batch_size, emb_dimension]
-        pos_w_emb = self.w_embeddings(torch.LongTensor(pos_w).to(self.device))  # [batch_size, emb_dimension]
-        neg_w_emb = self.w_embeddings(
-            torch.LongTensor(neg_w).to(self.device))  # [neg_samples, batch_size, emb_dimension]
+    def forward_cbow(self, contexts: Tensor, target: Tensor, negatives: Tensor, weights: Tensor = None):
+        emb_context = self.input_emb(contexts)
+        emb_mean = emb_context.mean(dim=1)
+        emb_target = self.output_emb(target)
+        pos_score = torch.sum(emb_mean * emb_target, dim=1)
 
-        # Compute positive score
-        score_1 = torch.mul(pos_u_emb, pos_w_emb).sum(dim=1)  # Dot product
-        score_2 = F.logsigmoid(score_1)  # log sigmoid
+        neg_emb = self.output_emb(negatives)
+        neg_score = torch.bmm(neg_emb, emb_mean.unsqueeze(2)).squeeze(2)
 
-        # Compute negative score
-        neg_score_1 = torch.bmm(neg_w_emb, pos_u_emb.unsqueeze(2)).squeeze(2)  # Batch matrix multiplication
-        neg_score_2 = F.logsigmoid(-neg_score_1).sum(dim=1)  # Log sigmoid and sum
+        pos_loss = torch.log(torch.sigmoid(pos_score) + 1e-10)
+        neg_loss = torch.sum(torch.log(torch.sigmoid(-neg_score) + 1e-10), dim=1)
 
-        # Loss function
-        loss = -torch.sum(score_2 + neg_score_2)
-        return loss
-
-    # Save embeddings
-    def save_embedding(self, id2word_dict, file_name):
-        embedding = self.u_embeddings.weight.data
-        with open(file_name, 'w', encoding='utf-8') as file_output:
-            file_output.write(f'{self.emb_size} {self.emb_dimension}\n')
-            for id, word in id2word_dict.items():
-                e = embedding[id].tolist()
-                e_str = ' '.join(map(str, e))
-                file_output.write(f'{word} {e_str}\n')
-
-    def vec_embedding(self):
-        return self.u_embeddings.weight.data
+        if weights is not None:
+            loss = -(pos_loss * weights + neg_loss)
+        else:
+            loss = -(pos_loss + neg_loss)
+        return loss.mean()

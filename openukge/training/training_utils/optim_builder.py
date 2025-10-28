@@ -2,6 +2,10 @@ import torch
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 from typing import Optional, Dict
+try:
+    from torch.optim.lr_scheduler import LRScheduler
+except ImportError:
+    from torch.optim.lr_scheduler import _LRScheduler as LRScheduler  # type: ignore
 
 
 class OptimBuilder:
@@ -56,7 +60,7 @@ class OptimBuilder:
         optimizer = opt_class(model.parameters(), **kwargs)
         return optimizer
 
-    def build_scheduler(self, optimizer: torch.optim.Optimizer) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
+    def build_scheduler(self, optimizer: torch.optim.Optimizer) -> Optional[LRScheduler]:
         """
         Build and return the learning rate scheduler if specified.
 

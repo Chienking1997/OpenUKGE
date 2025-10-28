@@ -1,149 +1,73 @@
-from collections import deque
-import random
+import torch
+from torch.utils.data import Dataset
+from collections import defaultdict
+from typing import List, Tuple
 
 
-class Word2VecData:
-    def __init__(self, input_data, min_count):
-        self.index = 0
-        self.input_data = input_data
-        self.input_triples = self.convert_triples()
-        self.min_count = min_count  # 要淘汰的低频数据的频度
-        self.wordId_frequency_dict = dict()  # 词id-出现次数 dict
-        self.word_count = 0  # 单词数（重复的词只算1个）
-        self.word_count_sum = 0  # 单词总数 （重复的词 次数也累加）
-        self.sentence_count = 0  # 句子数
-        self.id2word_dict = dict()  # 词id-词 dict
-        self.word2id_dict = dict()  # 词-词id dict
-        self._init_dict()  # 初始化字典
-        self.sample_table = []
-        self._init_sample_table()  # 初始化负采样映射表
-        self.word_pairs_queue = deque()
-        # 结果展示
-        print('Word Count is:', self.word_count)
-        print('Word Count Sum is', self.word_count_sum)
-        print('Sentence Count is:', self.sentence_count)
+class Word2VecUncertainDataset(Dataset):
+    """Word2Vec Dataset for uncertain knowledge graph: (h, r, t, confidence)."""
 
-    def convert_triples(self):
-        """
-        Convert the relationship indices in triples to distinguish them from entity indices.
-        The function adds an 'r' prefix to the relationship index in each triple.
+    def __init__(self, quadruples: List[List[float]], window_size: int = 2, sg: int = 1, neg_sample_num: int = 5):
+        self.sg = sg
+        self.window = window_size
+        self.neg_sample_num = neg_sample_num
+        self.quads = self._convert_triples(quadruples)
+        self.word2idx, self.idx2word = self._build_vocab()
+        self.neg_dist = self._build_neg_distribution()
+        self.training_pairs = self._generate_pairs()
 
-        Args:
-            self.input_data (list of lists): A list of triples, where each triple is [head, relation, tail].
+    @staticmethod
+    def _convert_triples(quads):
+        return [[str(h), f"r{r}", str(t), float(p)] for h, r, t, p in quads]
 
-        Returns:
-            list of lists: A new list of triples with the relation index converted.
-        """
-        converted_triples = []
+    def _build_vocab(self):
+        vocab = {token for quad in self.quads for token in quad[:3]}
+        word2idx = {w: i for i, w in enumerate(sorted(vocab, key=str))}
+        idx2word = {i: w for w, i in word2idx.items()}
+        return word2idx, idx2word
 
-        for triple in self.input_data:
-            head, relation, tail, _ = triple
-            # Convert relation index to a string with 'r' prefix
-            relation_str = f"r{relation}"
-            # Append the converted triple to the new list
-            converted_triples.append([head, relation_str, tail])
+    def _build_neg_distribution(self):
+        freq = defaultdict(int)
+        for quad in self.quads:
+            for token in quad[:3]:
+                freq[token] += 1
+        freqs = torch.tensor([freq[w] for w in self.word2idx.keys()], dtype=torch.float)
+        return (freqs ** 0.75) / torch.sum(freqs ** 0.75)
 
-        return converted_triples
+    def _generate_pairs(self):
+        pairs = []
+        for quad in self.quads:
+            tokens, p = quad[:3], quad[3]
+            for i, center in enumerate(tokens):
+                context_range = range(max(0, i - self.window), min(len(tokens), i + self.window + 1))
+                context_words = [tokens[j] for j in context_range if j != i]
+                if self.sg:
+                    for ctx in context_words:
+                        pairs.append((self.word2idx[center], self.word2idx[ctx], p))
+                elif context_words:
+                    pairs.append(([self.word2idx[w] for w in context_words], self.word2idx[center], p))
+        return pairs
 
-    def _init_dict(self):
-        word_freq = dict()
-        # 统计 word_frequency
-        for line in self.input_triples:
-            self.word_count_sum += len(line)
-            self.sentence_count += 1
-            for word in line:
-                if word in word_freq:
-                    word_freq[word] += 1
-                else:
-                    word_freq[word] = 1
-        word_id = 0
-        # 初始化 word2id_dict,id2word_dict, wordId_frequency_dict字典
-        for per_word, per_count in word_freq.items():
-            if per_count < self.min_count:  # 去除低频
-                self.word_count_sum -= per_count
-                continue
-            self.id2word_dict[word_id] = per_word
-            self.word2id_dict[per_word] = word_id
-            self.wordId_frequency_dict[word_id] = per_count
-            word_id += 1
-        self.word_count = len(self.word2id_dict)
+    def __len__(self):
+        return len(self.training_pairs)
 
-    def _init_sample_table(self):
-        sample_table_size = int(1e8)
-        pow_frequency = [count ** 0.75 for count in self.wordId_frequency_dict.values()]  # 词频指数为3/4
-        word_pow_sum = sum(pow_frequency)  # 所有词的总词频
-        ratio_array = [freq / word_pow_sum for freq in pow_frequency]  # 词频比率
-        word_count_list = [int(round(ratio * sample_table_size)) for ratio in ratio_array]
-        for word_index, word_freq in enumerate(word_count_list):
-            self.sample_table.extend([word_index] * word_freq)  # 生成list，内容为各词的id，list中每个id重复多次
+    def __getitem__(self, idx):
+        return self.training_pairs[idx]
 
-    # 获取mini-batch大小的 正采样对 (Xw,w) Xw为上下文id数组，w为目标词id。上下文步长为window_size，即2c = 2*window_size
 
-    def get_batch_pairs(self, batch_size, window_size):
-        # 确保 word_pairs_queue 有足够的正采样对
-        while len(self.word_pairs_queue) < batch_size:
-            # 先填充 10000 条三元组
-            for _ in range(10000):
-                # 检查是否需要重新循环三元组
-                if self.index >= len(self.input_triples):
-                    self.index = 0  # 如果已经遍历到末尾，重置指针从头开始
+def collate_skipgram(batch: List[Tuple[int, int, float]]):
+    centers = torch.tensor([b[0] for b in batch], dtype=torch.long)
+    contexts = torch.tensor([b[1] for b in batch], dtype=torch.long)
+    weights = torch.tensor([b[2] for b in batch], dtype=torch.float)
 
-                # 获取当前的三元组
-                triple = self.input_triples[self.index]
-                self.index += 1  # 更新指针，准备下一次选择下一个三元组
-                wordId_list = []  # 一句中的所有word 对应的 id
-                for word in triple:
-                        wordId_list.append(self.word2id_dict[word])
-                # 寻找正采样对 (context(w), w) 加入正采样队列
-                for i, wordId_w in enumerate(wordId_list):
-                    context_ids = []
-                    for j, wordId_u in enumerate(wordId_list[max(i - window_size, 0):i + window_size + 1]):
-                        assert wordId_w < self.word_count
-                        assert wordId_u < self.word_count
-                        if i == j:  # 上下文=中心词 跳过
-                            continue
-                        elif max(0, i - window_size + 1) <= j <= min(len(wordId_list), i + window_size - 1):
-                            context_ids.append(wordId_u)
-                    if len(context_ids) == 0:
-                        continue
-                    self.word_pairs_queue.append((context_ids, wordId_w))
+    return centers, contexts, weights
 
-        result_pairs = []  # 返回mini-batch大小的正采样对
-        for _ in range(batch_size):
-            result_pairs.append(self.word_pairs_queue.popleft())  # 取出正采样对
 
-        return result_pairs
-
-    def get_batch_pairs_sg(self, batch_size, window_size):
-        while len(self.word_pairs_queue) < batch_size:
-            for _ in range(10000):  # 先加入10000条，减少循环调用次数
-
-                if self.index >= len(self.input_triples):
-                    self.index = 0  # 如果已经遍历到末尾，重置指针从头开始
-
-                # 获取当前的三元组
-                triple = self.input_triples[self.index]
-                self.index += 1  # 更新指针，准备下一次选择下一个三元组
-                wordId_list = []  # 一句中的所有word 对应的 id
-                for word in triple:
-                    if word in self.word2id_dict:
-                        wordId_list.append(self.word2id_dict[word])
-                # 寻找正采样对 (w, v) 加入正采样队列
-                for i, wordId_w in enumerate(wordId_list):
-                    for j, wordId_v in enumerate(wordId_list[max(i - window_size, 0):i + window_size + 1]):
-                        assert wordId_w < self.word_count
-                        assert wordId_v < self.word_count
-                        if i == j:  # 上下文 = 中心词 跳过
-                            continue
-                        self.word_pairs_queue.append((wordId_w, wordId_v))
-        result_pairs = [self.word_pairs_queue.popleft() for _ in range(batch_size)]
-        return result_pairs
-
-    # 获取负采样 输入正采样对数组 positive_pairs，以及每个正采样对需要的负采样数 neg_count 从采样表抽取负采样词的id
-    def get_negative_sampling(self, len_positive_pairs, neg_count):
-        neg = [random.choices(self.sample_table, k=neg_count) for _ in range(len_positive_pairs)]
-        return neg
-
-    # 估计数据中正采样对数，用于设定batch
-    def evaluate_pairs_count(self, window_size):
-        return self.word_count_sum * (2 * window_size - 1) - (self.sentence_count - 1) * (1 + window_size) * window_size
+def collate_cbow(batch: List[Tuple[List[int], int, float]]):
+    max_len = max(len(b[0]) for b in batch)
+    padded_contexts = torch.zeros(len(batch), max_len, dtype=torch.long)
+    for i, (ctx_list, _, _) in enumerate(batch):
+        padded_contexts[i, :len(ctx_list)] = torch.tensor(ctx_list, dtype=torch.long)
+    targets = torch.tensor([b[1] for b in batch], dtype=torch.long)
+    weights = torch.tensor([b[2] for b in batch], dtype=torch.float)
+    return padded_contexts, targets, weights

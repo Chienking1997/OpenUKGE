@@ -4,44 +4,38 @@ from tqdm.auto import tqdm, trange
 # === Local project imports ===
 from ..utils import prepare_device
 from ..evaluation import (
-    conf_predict,
-    print_results,
-    link_predict,
     high_link_predict,
     weight_link_predict,
     val_link_predict,
     val_high_link_predict,
     val_weight_link_predict,
     mean_ndcg,
-    ece_t,
 )
 
 
 class GtransETrainer:
     """
-    Uncertain Knowledge Graph Embedding (UKGE) Trainer.
+    Trainer for GtransE Knowledge Graph Embeddings.
 
-    Handles model training, validation, and testing across multiple
-    evaluation modes, including uncertainty-aware and confidence-based metrics.
+    Handles training, validation, and testing, including high-confidence
+    and weighted link predictions, as well as ranking metrics.
 
     Args:
-        data: Dataset wrapper that provides train/val/test dataloaders.
+        data: Dataset wrapper providing train/val/test dataloaders.
         model: PyTorch model instance.
         loss: Loss function callable.
         opt: Optimizer/scheduler builder (must implement `build_optimizer` and `build_scheduler`).
         early_stop: EarlyStopping instance.
         save_path (str): Path to save the best model checkpoint.
         config (dict, optional): Optional configuration dictionary.
-        psl (bool, default=False): Whether to use PSL-related training samples.
     """
 
     def __init__(self, data=None, model=None, loss=None, opt=None,
                  early_stop=None, save_path=None, config=None):
-
         # === Data and device setup ===
         self.data = data
         self.train_loader = data.train_dataloader()
-        self.valid = data.val_dataloader()
+        self.valid_loader = data.val_dataloader()
         self.test_data = data.test_dataloader()
         self.device = prepare_device()
 
@@ -50,7 +44,7 @@ class GtransETrainer:
         self.loss_fn = loss
         self.early_stop = early_stop
         self.save_path = save_path
-        self.config = config  # Reserved for extended configs
+        self.config = config
 
         # === Optimizer & scheduler ===
         self.optimizer = opt.build_optimizer(model=self.model)
@@ -61,11 +55,11 @@ class GtransETrainer:
     # --------------------------------------------------------------------------
     def fit(self, epochs: int, eval_freq: int = 5):
         """
-        Run the main training loop with periodic validation and early stopping.
+        Run the training loop with periodic validation and early stopping.
 
         Args:
-            epochs (int): Total training epochs.
-            eval_freq (int): Frequency (in epochs) of validation.
+            epochs (int): Total number of epochs.
+            eval_freq (int): Frequency of validation in epochs.
         """
         epochs_bar = trange(1, epochs + 1, desc="Training", leave=True)
 
@@ -73,8 +67,8 @@ class GtransETrainer:
             avg_loss = self._train_epoch()
             epochs_bar.set_description(f"Epoch {epoch} | Loss: {avg_loss:.4f}")
 
-            # === Periodic validation ===
-            if epoch % eval_freq == 0:
+            # --- Periodic validation ---
+            if self.early_stop and epoch % eval_freq == 0:
                 monitor_metric = self.early_stop.get_monitor()
                 mode = self.early_stop.get_monitor_mode()
                 val_result = self._valid_epoch(monitor_metric, mode)
@@ -94,7 +88,12 @@ class GtransETrainer:
     # Train One Epoch
     # --------------------------------------------------------------------------
     def _train_epoch(self) -> float:
-        """Run one training epoch and return the average loss."""
+        """
+        Run one training epoch and return the average loss.
+
+        Returns:
+            float: Average loss over this epoch.
+        """
         self.model.train()
         total_loss = 0.0
         train_bar = tqdm(self.train_loader, desc="Train", leave=False)
@@ -110,7 +109,6 @@ class GtransETrainer:
             pos_score = self.model(pos_sample)
             neg_score = self.model(neg_sample)
 
-            # regularization = self.model.regularization(pos_sample)
             loss = self.loss_fn(pos_score, neg_score, pro)
             loss.backward()
             self.optimizer.step()
@@ -131,54 +129,41 @@ class GtransETrainer:
         Run a validation epoch and return the metric specified by `monitor`.
 
         Args:
-            monitor (str): Metric to monitor. One of:
-                {"mse", "mae", "umrr", "umr", "mrr", "mr", "wmrr", "wmr", "ndcg"}.
-            mode (str): Link prediction mode, one of:
-                {"head", "tail", "average"}.
-                - "head": Predict head entities only.
-                - "tail": Predict tail entities only.
-                - "average": Mean of head and tail predictions.
+            monitor (str): Metric to monitor, one of {"umrr", "umr", "mrr", "mr", "wmrr", "wmr", "ndcg"}.
+            mode (str): Prediction mode, one of {"head", "tail", "average"}.
 
         Returns:
             float: Validation score for the monitored metric.
         """
         self.model.eval()
         with torch.no_grad():
-            val_triples = self.valid["triples"].to(self.device)
-            val_probs = self.valid["probabilities"].to(self.device)
+            val_triples = self.valid_loader["triples"].to(self.device)
+            val_probs = self.valid_loader["probabilities"].to(self.device)
 
-            # # --- (1) Confidence prediction metrics ---
-            # if monitor in {"mse", "mae"}:
-            #     mse, mae = conf_predict(val_triples, val_probs, self.model)
-            #     return {"mse": mse.item(), "mae": mae.item()}[monitor]
+            # --- Uncertainty-aware link prediction ---
+            if monitor in {"umrr", "umr"}:
+                result = val_link_predict(val_triples, val_probs, self.model,
+                                          self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
+                return mrr_raw.item() if monitor == "umrr" else mr_raw.item()
 
-            # # --- (1) Uncertainty-aware link prediction (UMRR/UMR) ---
-            # if monitor in {"umrr", "umr"}:
-            #     result = val_link_predict(val_triples, val_probs, self.model, self.valid, prediction_mode=mode)
-            #     (
-            #         mr_raw, mrr_raw, hit1_raw, hit3_raw, hit10_raw,
-            #         mr_filter, mrr_filter, hit1_filter, hit3_filter, hit10_filter
-            #     ) = result
-            #     return mrr_raw.item() if monitor == "umrr" else mr_raw.item()
-
-            # --- (1) High-confidence link prediction (MRR/MR) ---
-            if monitor in {"mrr", "mr"}:
-                high_triples = self.valid["high_triples"].to(self.device)
-                high_probs = self.valid["high_probabilities"].to(self.device)
-                result = val_high_link_predict(high_triples, high_probs, self.model, self.valid, prediction_mode=mode)
-                (
-                    mr_raw, mrr_raw, hit1_raw, hit3_raw, hit10_raw,
-                    mr_filter, mrr_filter, hit1_filter, hit3_filter, hit10_filter
-                ) = result
+            # --- High-confidence link prediction ---
+            elif monitor in {"mrr", "mr"}:
+                high_triples = self.valid_loader["high_triples"].to(self.device)
+                high_probs = self.valid_loader["high_probabilities"].to(self.device)
+                result = val_high_link_predict(high_triples, high_probs, self.model,
+                                               self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
                 return mrr_raw.item() if monitor == "mrr" else mr_raw.item()
 
-            # --- (2) Weighted link prediction (WMRR/WMR) ---
+            # --- Weighted link prediction ---
             elif monitor in {"wmrr", "wmr"}:
-                result = val_weight_link_predict(val_triples, val_probs, self.model, self.valid, prediction_mode=mode)
-                mr_raw, mrr_raw, hit20_raw, hit40_raw = result
+                result = val_weight_link_predict(val_triples, val_probs, self.model,
+                                                 self.valid_loader, prediction_mode=mode)
+                mr_raw, mrr_raw, *_ = result
                 return mrr_raw.item() if monitor == "wmrr" else mr_raw.item()
 
-            # --- (3) Ranking quality (NDCG) ---
+            # --- Ranking quality (NDCG) ---
             elif monitor == "ndcg":
                 linear_ndcg, _ = mean_ndcg(self.test_data["hr_map"], self.model, self.device)
                 return linear_ndcg
@@ -192,29 +177,17 @@ class GtransETrainer:
     def test(self):
         """
         Load the best model checkpoint and evaluate on the test set.
-        Includes link prediction, calibration, and ranking metrics.
+        Includes link prediction (high-confidence and weighted) and ranking metrics.
         """
         self.model.eval()
         with torch.no_grad():
+            # --- Load best model ---
             self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
+
             test_data = self.test_data
             device = self.device
 
-            # # === Confidence prediction ===
-            # mse, mae = conf_predict(
-            #     test_data["test_neg"].to(device),
-            #     test_data["test_neg_pro"].to(device),
-            #     self.model
-            # )
-            # print_results(mse, mae)
-
-            # === Link prediction (three types) ===
-            # link_predict(
-            #     test_data["triples"].to(device),
-            #     test_data["probabilities"].to(device),
-            #     self.model, test_data
-            # )
-
+            # --- Link prediction ---
             high_link_predict(
                 test_data["high_triples"].to(device),
                 test_data["high_probabilities"].to(device),
@@ -227,15 +200,8 @@ class GtransETrainer:
                 self.model, test_data
             )
 
-            # === Ranking metrics ===
+            # --- Ranking metrics ---
             linear_ndcg, exp_ndcg = mean_ndcg(test_data["hr_map"], self.model, device)
             print(f"nDCG_linear: {linear_ndcg:.4f} | nDCG_exp: {exp_ndcg:.4f}")
 
-            # === Calibration (ECE) ===
-            ece = ece_t(
-                test_data["test_neg"].to(device),
-                test_data["test_neg_pro"].to(device),
-                self.model
-            )
-            print(f"ECE: {ece:.4f}")
             print("✅ Test completed.")

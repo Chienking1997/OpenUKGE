@@ -245,6 +245,12 @@ class UPGATTrainer:
                 test_data["test_neg_pro"].to(device),
                 self.model
             )
+            print(f"ECE with neg: {ece:.4f}")
+            ece = ece_t(
+                test_data["triples"].to(device),
+                test_data["probabilities"].to(device),
+                self.model
+            )
             print(f"ECE: {ece:.4f}")
             print("✅ Test completed.")
 

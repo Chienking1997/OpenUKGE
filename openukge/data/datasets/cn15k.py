@@ -1,8 +1,8 @@
-from ..dataset import LoadUKGEDataset
-from ..word_vec_data import Word2VecData
+from ..dataset import LoadUKGEDataset, LoadFewShotDataset
 
 
-def load_data(root, num_neg, batch_size, high_threshold=0.70, num_partitions=5, use_pseudo=False):
+
+def load_data(root, num_neg, batch_size, high_threshold=0.80, num_partitions=5, use_pseudo=False):
     dataset = LoadUKGEDataset(root=root,
                               dataset_name='cn15k',
                               num_neg_samples=num_neg,
@@ -13,9 +13,15 @@ def load_data(root, num_neg, batch_size, high_threshold=0.70, num_partitions=5, 
     dataloader = dataset.get_dataloader()
     return dataloader
 
+def load_few_shot_data(root, num_neg, batch_size, max_neighbor, few, type_constrain, has_ont=False, rel_uc=None):
+    dataset = LoadFewShotDataset(root=root, dataset_name='cn15k-few-shot',
+                                 num_neg_samples=num_neg, batch_size=batch_size,
+                                 max_neighbor = max_neighbor, has_ont = has_ont, few=few,
+                                 type_constrain=type_constrain, rel_uc=rel_uc)
+    dataloader = dataset.get_dataloader()
+    return dataloader
 
-def prepare_triplets_for_word2vec(input_data, min_count):
-    return Word2VecData(input_data, min_count)
+
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+
 
 def ece_t(triples, probabilities, model):
     pred_score = torch.zeros(5).cuda()

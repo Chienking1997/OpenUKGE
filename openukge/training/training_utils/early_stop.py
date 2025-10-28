@@ -1,13 +1,24 @@
+import os
 import torch
 
 
 class EarlyStop:
-    def __init__(self, patience=5, min_delta=0, monitor="mse", mode="min", monitor_mode=""):
+    """
+    Early stopping utility to prevent overfitting by stopping training
+    when a monitored metric has stopped improving.
+    """
+
+    def __init__(self, patience=5, min_delta=0.0, monitor="mse", mode="min", monitor_mode=""):
         """
-        :param patience: 模型允许在多少个epoch没有提升的情况下继续训练
-        :param min_delta: 性能提升的最小变化，如果小于该值则认为性能没有提升
-        :param monitor: 要监控的指标，比如 "val_loss" 或 "val_acc"
-        :param mode: 'min' 表示最小化指标, 'max' 表示最大化指标
+        Args:
+            patience (int): Number of epochs with no improvement
+                            after which training will be stopped.
+            min_delta (float): Minimum performance improvement required
+                               to reset the patience counter.
+            monitor (str): Metric name to monitor (e.g., "val_loss", "mse").
+            mode (str): "min" means lower metric value is better,
+                        "max" means higher metric value is better.
+            monitor_mode (str): Additional label for tracking which metric
         """
         self.patience = patience
         self.min_delta = min_delta
@@ -18,51 +29,65 @@ class EarlyStop:
         self.counter = 0
         self.early_stop = False
 
-        # 如果模式是 'min'，则希望指标尽量小；如果模式是 'max'，则希望指标尽量大
-        if self.mode == 'min':
+        # Determine improvement direction
+        if mode == "min":
             self.is_improvement = lambda current, best: current < best - self.min_delta
-        elif self.mode == 'max':
+        elif mode == "max":
             self.is_improvement = lambda current, best: current > best + self.min_delta
         else:
-            raise ValueError("mode should be either 'min' or 'max'")
+            raise ValueError("mode must be 'min' or 'max'")
 
     def __call__(self, current_value, model=None, save_path=None):
         """
-        在每次训练结束后调用该方法以检查是否应该停止训练
-        :param current_value: 当前epoch中的监控指标的值
-        :return: 是否需要停止训练
+        Evaluate metric after each epoch and check early stopping condition.
+
+        Args:
+            current_value (float): Current monitored metric.
+            model (torch.nn.Module, optional): Model to save when improved.
+            save_path (str, optional): Path to save the best model.
+
+        Returns:
+            (bool, float): early_stop_flag, best_value
         """
         if self.best_value is None:
-            # 初始化时将当前值作为最佳值
+            # First epoch → initialize best value
             self.best_value = current_value
             self.save_best_model(model, save_path)
+
         elif self.is_improvement(current_value, self.best_value):
-            # 如果监控指标有显著提升，更新最佳值，并重置计数器
+            # Reset counter upon improvement
             self.best_value = current_value
             self.counter = 0
-            # 保存最佳模型参数
             if model is not None and save_path is not None:
                 self.save_best_model(model, save_path)
+
         else:
-            # 否则计数器加一
+            # No improvement → increase counter
             self.counter += 1
             if self.counter >= self.patience:
-                # 如果计数器超过设定的耐心值，触发早停
                 self.early_stop = True
+
         return self.early_stop, self.best_value
 
     def get_monitor(self):
+        """Return monitored metric name"""
         return self.monitor
 
     def get_monitor_mode(self):
+        """Return monitored metric mode"""
         return self.monitor_mode
 
     @staticmethod
     def save_best_model(model, save_path):
         """
-        保存最佳模型参数
-        :param model: 当前模型实例
-        :param save_path: 保存模型的路径
+        Save model state dict to file. Automatically creates directory if missing.
         """
+        if save_path is None or model is None:
+            return
+
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+
         torch.save(model.state_dict(), save_path)
-        # print(f"Best model saved to {save_path}")
+        # print(f"[EarlyStop] Best model saved at: {save_path}")

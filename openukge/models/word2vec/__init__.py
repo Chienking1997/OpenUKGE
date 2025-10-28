@@ -1,2 +1,2 @@
-from .cbow import CBOWModel
-from .skipgram import SkipGramModel
+from .cbow import Word2VecCBOWModel
+from .skipgram import Word2VecSkipGramModel

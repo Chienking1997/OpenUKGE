@@ -11,18 +11,25 @@ class FocusE(nn.Module):
         self.embedding_range = None
         self.epsilon = None
         self.config = config
+        self.num_ent = num_ent
+        self.num_rel = num_rel
         self.reg_scale1 = reg_scale1
         self.reg_scale2 = reg_scale2
         self.emb_dim = emb_dim
         self.margin = margin
-        self.beta = 1.0
         self.base_model = base_model
-        self.ent_emb = nn.Embedding(num_ent, emb_dim)
-        self.rel_emb = nn.Embedding(num_rel, emb_dim)
+        self.ent_emb = nn.Embedding(self.num_ent, self.emb_dim)
+        self.rel_emb = nn.Embedding(self.num_rel, self.emb_dim)
+
+        # β 表示结构影响系数（随 epoch 变化）
+        self.beta = 1.0
 
         self.init_emb()
 
     def init_emb(self):
+        """Initialize the entity and relation embeddings in the form of a uniform distribution.
+
+        """
         self.epsilon = 2.0
         self.margin = nn.Parameter(
             torch.Tensor([self.margin]),
@@ -32,8 +39,11 @@ class FocusE(nn.Module):
             torch.Tensor([(self.margin.item() + self.epsilon) / self.emb_dim]),
             requires_grad=False
         )
-        nn.init.uniform_(self.ent_emb.weight.data, a=-self.embedding_range.item(), b=self.embedding_range.item())
-        nn.init.uniform_(self.rel_emb.weight.data, a=-self.embedding_range.item(), b=self.embedding_range.item())
+
+        nn.init.uniform_(tensor=self.ent_emb.weight.data, a=-self.embedding_range.item(), b=self.embedding_range.item())
+        nn.init.uniform_(tensor=self.rel_emb.weight.data, a=-self.embedding_range.item(), b=self.embedding_range.item())
+        # nn.init.xavier_uniform_(self.ent_emb.weight.data)
+        # nn.init.xavier_uniform_(self.rel_emb.weight.data)
 
     def tri2emb(self, triples):
         head_emb = self.ent_emb(triples[:, 0])
@@ -56,9 +66,8 @@ class FocusE(nn.Module):
         """
 
         if self.base_model == "DistMult":
-            score = (head_emb * tail_emb) * relation_emb
+            score = (head_emb * tail_emb * relation_emb).sum(dim=-1)
 
-            score = score.sum(dim=-1)
         elif self.base_model == "ComplEX":
             re_head, im_head = torch.chunk(head_emb, 2, dim=-1)
             re_relation, im_relation = torch.chunk(relation_emb, 2, dim=-1)
@@ -76,11 +85,25 @@ class FocusE(nn.Module):
 
         return score
 
-    def forward(self, triples, pro, num_neg=0):
+    def forward(self, triples):
         """The functions used in the training phase
 
         Args:
-            triples: The triples ids, as (h, r, t, c), shape:[batch_size, 3].
+            triples: The triples ids, as (h, r, t), shape:[batch_size, 3].
+
+        Returns:
+            score: The score of triples.
+        """
+        head_emb, relation_emb, tail_emb = self.tri2emb(triples)
+        score = self.score_func(head_emb, relation_emb, tail_emb)
+        score = F.softplus(score)
+        return score
+
+    def forward_weighted(self, triples, pro, pro_expand=None):
+        """The functions used in the training phase
+
+        Args:
+            triples: The triples ids, as (h, r, t), shape:[batch_size, 3].
             pro: The pro c, shape:[1].
 
         Returns:
@@ -88,15 +111,15 @@ class FocusE(nn.Module):
         """
         head_emb, relation_emb, tail_emb = self.tri2emb(triples)
         score = self.score_func(head_emb, relation_emb, tail_emb)
-        softplus = nn.Softplus()
-        score = softplus(score)
-        if num_neg > 0:
-            alpha = self.beta + pro * (1 - self.beta)
-            score = alpha.repeat_interleave(2 * num_neg) * score
+        score = F.softplus(score)
+
+        if pro_expand is not None:
+            score = score.view(pro_expand.shape[0], -1)
+            alpha = self.beta + pro_expand * (1 - self.beta)
         else:
             alpha = self.beta + (torch.ones(pro.shape).to(pro.device) - pro) * (1 - self.beta)
-            score = alpha * score
 
+        score = alpha * score
         return score
 
     def regularization(self, triples):
@@ -117,16 +140,22 @@ class FocusE(nn.Module):
         head_emb = self.ent_emb(head_id)
         relation_emb = self.rel_emb(relation_id)
         score = self.score_func(head_emb, relation_emb, self.ent_emb.weight.data)
-        softplus = nn.Softplus()
-        score = softplus(score)
+        score = F.softplus(score)
         return score
 
     def get_head_score(self, tail_id, relation_id):
         tail_emb = self.ent_emb(tail_id)
         relation_emb = self.rel_emb(relation_id)
         score = self.score_func(self.ent_emb.weight.data, relation_emb, tail_emb)
-        softplus = nn.Softplus()
-        score = softplus(score)
+        score = F.softplus(score)
+        return score
+
+    def get_hrt_score(self, head_id, relation_id, tail_id):
+        head_emb = self.ent_emb(head_id)
+        relation_emb = self.rel_emb(relation_id)
+        tail_emb = self.ent_emb(tail_id)
+        score = self.score_func(head_emb, relation_emb, tail_emb)
+        score = F.softplus(score)
         return score
 
     def adjust_parameters(self, current_epoch, max_epochs):

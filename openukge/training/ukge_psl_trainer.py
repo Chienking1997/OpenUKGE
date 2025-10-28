@@ -17,7 +17,7 @@ from ..evaluation import (
 )
 
 
-class UKGETrainer:
+class UKGEPSLTrainer:
     """
     Uncertain Knowledge Graph Embedding (UKGE) Trainer.
 
@@ -32,14 +32,15 @@ class UKGETrainer:
         early_stop: EarlyStopping instance.
         save_path (str): Path to save the best model checkpoint.
         config (dict, optional): Optional configuration dictionary.
+        psl (bool, default=False): Whether to use PSL-related training samples.
     """
 
     def __init__(self, data=None, model=None, loss=None, opt=None,
-                 early_stop=None, save_path=None, config=None):
+                 early_stop=None, save_path=None, config=None, psl=False):
 
         # === Data and device setup ===
         self.data = data
-        self.train_loader = data.train_dataloader()
+        self.train_loader = data.train_dataloader(psl=psl)
         self.valid = data.val_dataloader()
         self.test_data = data.test_dataloader()
         self.device = prepare_device()
@@ -103,14 +104,17 @@ class UKGETrainer:
             pos_sample = batch["positive_sample"].to(self.device)
             neg_sample = batch["negative_sample"].to(self.device)
             pro = batch["probabilities"].to(self.device)
+            psl_sample = batch["psl_sample"].to(self.device)
+            psl_pro = batch["psl_pro"].to(self.device)
 
             # --- Forward + Backward ---
             self.optimizer.zero_grad()
             pos_score = self.model(pos_sample)
             neg_score = self.model(neg_sample)
+            psl_score = self.model(psl_sample)
 
             regularization = self.model.regularization(pos_sample)
-            loss = self.loss_fn(pos_score, neg_score, pro) + regularization
+            loss = self.loss_fn(pos_score, neg_score, pro, psl_score, psl_pro) + regularization
             loss.backward()
             self.optimizer.step()
 

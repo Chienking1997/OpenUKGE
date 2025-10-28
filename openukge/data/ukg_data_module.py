@@ -85,3 +85,52 @@ class Repeater:
 
     def __next__(self):
         return self.value
+
+
+class FewShotModule:
+    def __init__(self, sampler, num_workers, config=None):
+        self.config = config
+        self.sampler = sampler
+        self.num_symbols = self.sampler.get_num_symbols()
+        self.few = self.sampler.get_few()
+        self.ent2id = self.sampler.get_ent2id()
+        self.type_constrain = self.sampler.get_type_constrain()
+        self.rel2candidates = self.sampler.get_rel2candidates()
+        self.rele1_e2 = self.sampler.get_rele1_e2()
+        self.symbol2id = self.sampler.get_symbol2id()
+        self.e1rel_e2 = self.sampler.get_e1rel_e2()
+        self.num_workers = num_workers
+        self.train = self.sampler.get_train()
+        self.valid = self.sampler.get_valid()
+        self.test = self.sampler.get_test()
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            drop_last=True,
+            collate_fn=self.sampler.sampling,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.valid,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            collate_fn=self.sampler.test_sampling,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            collate_fn=self.sampler.test_sampling,
+        )
+
+    def device_setter(self, device):
+        self.sampler.get_device(device)
