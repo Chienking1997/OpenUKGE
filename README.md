@@ -115,4 +115,5 @@ Contributions are very welcome. You can:
 
 For questions, suggestions, or collaborations:  
 📧 **chienking1997@outlook.com**
+
 We hope **OpenUKGE** becomes your go‑to tool for uncertain knowledge graph representation learning and drives advancement in this research area.
