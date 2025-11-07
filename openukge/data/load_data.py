@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 
 class UKGData:
-    def __init__(self, dataset_dir="", use_index_file=True, use_pseudo=False):
+    def __init__(self, dataset_dir="", use_index_file=True, use_psl=False, use_pseudo=False):
         """
         UKGData: Uncertain Knowledge Graph dataset loader.
 
@@ -41,6 +41,7 @@ class UKGData:
         self.test_data_neg = []    # Test triples with random negative samples (from BEUrRE-provided datasets)
 
         # Additional uncertain logical knowledge from soft logic inference
+        self.use_psl = use_psl
         self.soft_logic_data = []  # Soft logic triples with confidence
 
         # Combined dataset: train + validation + test
@@ -126,7 +127,7 @@ class UKGData:
             'test': self.test_data,
             'test_neg': self.test_data_neg,
             'all': self.all_data,
-            'soft_logic': self.soft_logic_data,
+            'soft_logic': self.soft_logic_data if self.use_psl else None,
             'all_true': self.all_true_data,
             'hr_map': self.hr_map,          # type: Dict[int, Dict[int, Dict[int, float]]]
             'hr_map_val': self.hr_map_val,  # type: Dict[int, Dict[int, Dict[int, float]]]
@@ -169,11 +170,13 @@ class UKGData:
 
             # Load already indexed data
             self.all_data = self.load_all_data(self.dataset_dir)
-            self.soft_logic_data = self.load_soft_data(self.dataset_dir)
+            if self.use_psl:
+                self.soft_logic_data = self.load_soft_data(self.dataset_dir)
             self.test_data_neg = self.load_test_neg_data(self.dataset_dir)
 
             # Compute ratio for soft logic guidance
-            self.RatioOfPSL = len(self.soft_logic_data) / len(self.train_data)
+            if self.use_psl:
+                self.RatioOfPSL = len(self.soft_logic_data) / len(self.train_data)
             self.all_true_data = set(self.all_data)
 
         else:
@@ -194,17 +197,19 @@ class UKGData:
             self.save_mapping(self.rel_id, relation_map_file)
 
             # Convert soft logic triples
-            self.soft_logic_data = self.triple2index(
-                self.load_soft_data(self.dataset_dir),
-                self.ent_id, self.rel_id
-            )
+            if self.use_psl:
+                self.soft_logic_data = self.triple2index(
+                    self.load_soft_data(self.dataset_dir),
+                    self.ent_id, self.rel_id
+                )
 
             # Combine all true triples
             self.all_data = self.train_data + self.val_data + self.test_data
             self.all_true_data = set(self.all_data)
 
             # Compute ratio for soft logic guidance
-            self.RatioOfPSL = len(self.soft_logic_data) / len(self.train_data)
+            if self.use_psl:
+                self.RatioOfPSL = len(self.soft_logic_data) / len(self.train_data)
 
 
     @staticmethod

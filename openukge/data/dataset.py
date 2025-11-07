@@ -11,6 +11,7 @@ class LoadUKGEDataset:
                  batch_size=None,
                  high_threshold=None,
                  num_partitions=None,
+                 use_psl=False,
                  use_pseudo=False,
                  config=None):
         if config:
@@ -22,11 +23,13 @@ class LoadUKGEDataset:
         self.batch_size = batch_size
         self.high_threshold = high_threshold
         self.num_partitions = num_partitions
+        self.use_psl = use_psl
         self.use_pseudo = use_pseudo
 
     def get_dataloader(self):
         data_path = download_dataset(dataset_name=self.dataset_name, download_path=self.root)
-        dataset = UKGData(dataset_dir=data_path, use_index_file=True, use_pseudo=self.use_pseudo)
+        dataset = UKGData(dataset_dir=data_path, use_index_file=True,
+                          use_psl=self.use_psl, use_pseudo=self.use_pseudo)
         final_data = dataset()
         sampler = UKGSampler(final_data, self.num_neg, self.high_threshold, self.num_partitions)
         dataloader = UKGDataModule(sampler=sampler,
