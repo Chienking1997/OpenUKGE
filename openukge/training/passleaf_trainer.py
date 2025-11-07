@@ -74,7 +74,7 @@ class PASSLEAFTrainer:
     # --------------------------------------------------------------------------
     # Training Loop
     # --------------------------------------------------------------------------
-    def fit(self, epochs: int, eval_freq: int = 5, t_new_semi=20, t_semi_train=30):
+    def fit(self, epochs: int, eval_freq: int = 5):
         """
         Run the main training loop with periodic validation and early stopping.
 
@@ -84,8 +84,6 @@ class PASSLEAFTrainer:
             t_new_semi (float, optional): Override for new semi-sample threshold.
             t_semi_train (float, optional): Override for semi-training threshold.
         """
-        self.t_new_semi = t_new_semi
-        self.t_semi_train = t_semi_train
 
         epochs_bar = trange(1, epochs + 1, desc="Training", leave=True)
 
@@ -94,7 +92,7 @@ class PASSLEAFTrainer:
             epochs_bar.set_description(f"Epoch {epoch} | Loss: {avg_loss:.4f}")
 
             # === Periodic validation ===
-            if epoch % eval_freq == 10:
+            if epoch % eval_freq == 0 and epoch >= self.t_semi_train:
                 monitor = self.early_stop.get_monitor()
                 mode = self.early_stop.get_monitor_mode()
 
