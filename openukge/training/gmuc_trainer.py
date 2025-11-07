@@ -4,18 +4,6 @@ from collections import defaultdict as ddict
 
 # === Local project imports ===
 from ..utils import prepare_device
-from ..evaluation import (
-    conf_predict,
-    print_results,
-    link_predict,
-    high_link_predict,
-    weight_link_predict,
-    val_link_predict,
-    val_high_link_predict,
-    val_weight_link_predict,
-    mean_ndcg,
-    ece_t,
-)
 
 
 class GMUCTrainer:
@@ -176,10 +164,10 @@ class GMUCTrainer:
         Load the best model checkpoint and evaluate on the test set.
         Includes link prediction, calibration, and ranking metrics.
         """
+        self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
         results = ddict(list)
         self.model.eval()
-        with torch.no_grad():
-            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
+        with torch.no_grad():            
             for batch in self.test_data:
                 result = self.val_test(batch)
                 for metric, value in result.items():

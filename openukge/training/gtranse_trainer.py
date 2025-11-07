@@ -165,7 +165,7 @@ class GtransETrainer:
 
             # --- Ranking quality (NDCG) ---
             elif monitor == "ndcg":
-                linear_ndcg, _ = mean_ndcg(self.test_data["hr_map"], self.model, self.device)
+                linear_ndcg, _ = mean_ndcg(self.valid_loader["hr_map"], self.model, self.device)
                 return linear_ndcg
 
             else:
@@ -179,11 +179,10 @@ class GtransETrainer:
         Load the best model checkpoint and evaluate on the test set.
         Includes link prediction (high-confidence and weighted) and ranking metrics.
         """
+        self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
         self.model.eval()
         with torch.no_grad():
             # --- Load best model ---
-            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
-
             test_data = self.test_data
             device = self.device
 

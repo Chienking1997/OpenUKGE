@@ -188,19 +188,25 @@ class BEUrRETrainer:
         Evaluate the best saved model on the test set.
         Includes confidence, link prediction, ranking, and calibration metrics.
         """
+        self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
         self.model.eval()
         with torch.no_grad():
-            # --- Load best model ---
-            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
-
+            # --- Load best model --- 
             test_triples = self.test_data["triples"].to(self.device)
             test_probs = self.test_data["probabilities"].to(self.device)
             test_high_triples = self.test_data["high_triples"].to(self.device)
             test_high_probs = self.test_data["high_probabilities"].to(self.device)
+            test_neg = self.test_data["test_neg"].to(self.device)
+            test_neg_pro = self.test_data["test_neg_pro"].to(self.device)
 
             # --- Confidence prediction ---
             mse, mae = conf_predict(test_triples, test_probs, self.model)
+            print("Only Test Data")
             print_results(mse, mae)
+
+            mse_neg, mae_neg = conf_predict(test_neg, test_neg_pro, self.model)
+            print("Test and Negative Data")
+            print_results(mse_neg, mae_neg)
 
             # --- Link prediction (three types) ---
             link_predict(test_triples, test_probs, self.model, self.test_data)
@@ -212,9 +218,7 @@ class BEUrRETrainer:
             print(f"nDCG_linear: {linear_ndcg:.4f} | nDCG_exp: {exp_ndcg:.4f}")
 
             # --- Calibration (ECE) ---
-            ece = ece_t(self.test_data["test_neg"].to(self.device),
-                        self.test_data["test_neg_pro"].to(self.device),
-                        self.model)
+            ece = ece_t(test_neg, test_neg_pro, self.model)
             print(f"ECE with neg: {ece:.4f}")
 
             ece = ece_t(test_triples, test_probs, self.model)

@@ -193,19 +193,28 @@ class UKGETrainer:
         Load the best model checkpoint and evaluate on the test set.
         Includes link prediction, calibration, and ranking metrics.
         """
+        self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
         self.model.eval()
-        with torch.no_grad():
-            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
+        with torch.no_grad():            
             test_data = self.test_data
             device = self.device
 
             # === Confidence prediction ===
             mse, mae = conf_predict(
+                test_data["triples"].to(device),
+                test_data["probabilities"].to(device),
+                self.model
+            )
+            print("Only Test Data")
+            print_results(mse, mae)
+
+            mse_neg, mae_neg = conf_predict(
                 test_data["test_neg"].to(device),
                 test_data["test_neg_pro"].to(device),
                 self.model
             )
-            print_results(mse, mae)
+            print("Test and Negative Data")
+            print_results(mse_neg, mae_neg)
 
             # === Link prediction (three types) ===
             link_predict(

@@ -181,11 +181,11 @@ class FocusETrainer:
         Evaluate the best saved model on the test set.
         Includes weighted and high-confidence link predictions and ranking metrics.
         """
+        self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
+
         self.model.eval()
         with torch.no_grad():
-            # --- Load best model ---
-            self.model.load_state_dict(torch.load(self.save_path, map_location=self.device))
-
+            # --- Load best model ---            
             test_triples = self.test_data["triples"].to(self.device)
             test_probs = self.test_data["probabilities"].to(self.device)
             test_high_triples = self.test_data["high_triples"].to(self.device)

@@ -178,7 +178,7 @@ class UKGsETrainer:
 
             # --- (5) Ranking quality (NDCG) ---
             elif monitor == "ndcg":
-                linear_ndcg, _ = mean_ndcg(self.test_data["hr_map"], self.model, self.device)
+                linear_ndcg, _ = mean_ndcg(self.valid["hr_map"], self.model, self.device)
                 return linear_ndcg
 
             else:
@@ -189,21 +189,31 @@ class UKGsETrainer:
     # ----------------------------------------------------------------------
     def test(self):
         """Evaluate model on the test set using various metrics."""
-        self.model.eval()
-        with torch.no_grad():
-
-            self.model.load_state_dict(
+        self.model.load_state_dict(
                 torch.load(self.save_path, map_location=self.device)
             )
+        self.model.eval()
+        with torch.no_grad():         
 
             data = self.test_data
             device = self.device
 
             # === Confidence Metrics ===
-            mse, mae = conf_predict(data["test_neg"].to(device),
-                                   data["test_neg_pro"].to(device),
-                                   self.model)
+            mse, mae = conf_predict(
+                data["triples"].to(device),
+                data["probabilities"].to(device),
+                self.model
+            )
+            print("Only Test Data")
             print_results(mse, mae)
+
+            mse_neg, mae_neg = conf_predict(
+                data["test_neg"].to(device),
+                data["test_neg_pro"].to(device),
+                self.model
+            )
+            print("Test and Negative Data")
+            print_results(mse_neg, mae_neg)
 
             # === Link Prediction Metrics ===
             link_predict(data["triples"].to(device),
