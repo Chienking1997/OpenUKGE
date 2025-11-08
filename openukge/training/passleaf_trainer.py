@@ -81,8 +81,6 @@ class PASSLEAFTrainer:
         Args:
             epochs (int): Total training epochs.
             eval_freq (int): Validation frequency (every N epochs).
-            t_new_semi (float, optional): Override for new semi-sample threshold.
-            t_semi_train (float, optional): Override for semi-training threshold.
         """
 
         epochs_bar = trange(1, epochs + 1, desc="Training", leave=True)
