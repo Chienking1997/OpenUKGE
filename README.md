@@ -49,6 +49,15 @@ pip install OpenUKGE
 ---
 
 ## 🚀 Quick Start
+
+You can quickly start training with one of the example scripts under the [`examples/`](https://github.com/Chienking1997/OpenUKGE/tree/master/examples) directory.  
+For instance, to train on the **NL27K** dataset using the **UKGE** model:
+
+```bash
+python examples/nl27k/UKGE/nl27k_UKGE_train.py
+```
+Other example scripts for different datasets and models are available in the [`examples/`](https://github.com/Chienking1997/OpenUKGE/tree/master/examples) folder (e.g., `cn15k`, `nl27k`, `ppi5k`, etc.).
+
 Take training the UKGE model using the NL27K dataset as an example.  
 ### 1️⃣ Import the required modules
 ```python
