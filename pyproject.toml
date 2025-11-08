@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "OpenUKGE"
-version = "1.0.0"
+version = "1.0.1"
 description = "OpenUKGE: An open-source Python library for uncertain knowledge graph embedding"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
