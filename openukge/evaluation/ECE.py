@@ -2,8 +2,9 @@ import torch
 
 
 def ece_t(triples, probabilities, model):
-    pred_score = torch.zeros(5).cuda()
-    test_split, confi, split_avg, ocu = split_tri(triples, probabilities, 5)
+    device = triples.device
+    pred_score = torch.zeros(5).to(device)
+    test_split, confi, split_avg, ocu = split_tri(triples, probabilities, device, 5)
     for i in range(len(test_split)):
         score = model(test_split[i])
         score = torch.clamp((score * 5).to(torch.long), 0, 4)
@@ -15,7 +16,7 @@ def ece_t(triples, probabilities, model):
 
 
 
-def split_tri(triples, probabilities, num_partitions=5):
+def split_tri(triples, probabilities, device, num_partitions=5):
     triples = triples.tolist()
     probabilities = probabilities.tolist()
     partitions = [[] for _ in range(num_partitions)]
@@ -29,8 +30,8 @@ def split_tri(triples, probabilities, num_partitions=5):
         partitions[partition_index].append(triple)
         confi[partition_index].append(confidence)
     for i in range(num_partitions):
-        partitions[i] = torch.tensor(partitions[i], dtype=torch.int64).cuda()
+        partitions[i] = torch.tensor(partitions[i], dtype=torch.int64).to(device)
         split_avg[i] = sum(confi[i])/len(confi[i])
         ocu_tri[i] = len(confi[i])/len(triples)
 
-    return partitions, confi, torch.tensor(split_avg).cuda(), torch.tensor(ocu_tri).cuda()
+    return partitions, confi, torch.tensor(split_avg).to(device), torch.tensor(ocu_tri).to(device)
