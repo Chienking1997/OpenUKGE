@@ -96,9 +96,7 @@ class PASSLEAF(nn.Module):
             score = score.sum(dim=-1)
 
             """ 1.Bounded rectifier """
-            # shape = score.shape
-            # tmp_max = torch.max(self.w * score + self.b, torch.zeros(shape, device=self.args.gpu))
-            # score = torch.min(tmp_max, torch.ones(shape, device=self.args.gpu))
+            #score = torch.clamp((self.w * score + self.b), min=0, max=1)
 
             """ 2.Logistic function"""
             score = torch.sigmoid(self.w * score + self.b)  # use UKGE_logi in PASSLEAF

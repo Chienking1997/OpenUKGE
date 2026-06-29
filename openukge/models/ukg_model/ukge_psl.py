@@ -44,9 +44,7 @@ class UKGEPSL(nn.Module):
         score = score.sum(dim=-1)
 
         """ 1.Bounded rectifier """
-        # shape = score.shape
-        # tmp_max = torch.max(self.w * score + self.b, torch.zeros(shape, device=self.args.gpu))
-        # score = torch.min(tmp_max, torch.ones(shape, device=self.args.gpu))
+        #score = torch.clamp((self.w * score + self.b), min=0, max=1)
 
         """ 2.Logistic function"""
         score = torch.sigmoid(self.w * score + self.b)
@@ -57,7 +55,7 @@ class UKGEPSL(nn.Module):
         """The functions used in the training phase
 
         Args:
-            triples: The triples ids, as (h, r, t, c), shape:[batch_size, 3].
+            triples: The triples ids, as (h, r, t), shape:[batch_size, 3].
 
         Returns:
             score: The score of triples.
