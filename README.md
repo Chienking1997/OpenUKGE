@@ -4,6 +4,7 @@ An Open‑Source Python Library for Uncertain Knowledge Graph Embedding
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8%2B-green.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%E2%9D%A4-red?logo=pytorch)](https://pytorch.org/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21052398.svg)](https://doi.org/10.5281/zenodo.21052398)
 
 ## 🌍 Overview  
 Uncertain knowledge graphs (UKGs), which associate each triple with a confidence score, enable more reliable knowledge completion and uncertainty-aware reasoning compared to deterministic knowledge graphs. However, heterogeneous implementations, diverse programming languages, and inconsistent evaluation settings of existing uncertain knowledge graph embedding (UKGE) methods hinder fair comparison and practical adoption.
@@ -126,3 +127,19 @@ For questions, suggestions, or collaborations:
 📧 **chienking1997@outlook.com**
 
 We hope **OpenUKGE** becomes your go‑to tool for uncertain knowledge graph representation learning and drives advancement in this research area.
+
+
+## Citation
+```
+@software{li_2026_21052398,
+  author       = {Li, Jianjing and Li, Guanfeng},
+  title        = {OpenUKGE : An Open‑Source Python Library for
+                   Uncertain Knowledge Graph Embedding},
+  month        = jun,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {1.0.2},
+  doi          = {10.5281/zenodo.21052398},
+  url          = {https://doi.org/10.5281/zenodo.21052398},
+}
+```
